@@ -1,0 +1,26 @@
+{
+  "name": "tui",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.tsx",
+    "auth": "tsx src/auth.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "ink": "^6.8.0",
+    "ink-select-input": "^6.2.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.8",
+    "react-reconciler": "^0.33.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "wreq-js": "^3.2.0"
+  }
+}
