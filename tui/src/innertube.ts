@@ -204,7 +204,8 @@ async function androidRequest(endpoint: string, body: Record<string, unknown>) {
 
 // === Tipos de resultado ===
 
-export interface SearchResult {
+export interface SongSearchResult {
+  type: 'song';
   videoId: string;
   title: string;
   artist: string;
@@ -212,47 +213,193 @@ export interface SearchResult {
   thumbnail: string;
 }
 
-// params para busca de músicas (Songs filter)
-const SEARCH_SONGS_PARAMS = 'EgWKAQIIAWoKEAkQChADEAQQBQ%3D%3D';
+export interface ArtistSearchResult {
+  type: 'artist';
+  browseId: string;
+  name: string;
+  thumbnail: string;
+  subtitle: string;
+}
+
+export type SearchResult = SongSearchResult | ArtistSearchResult;
+
+// ── Artist page ────────────────────────────────────────────────────
+export interface ArtistTopSong {
+  videoId: string;
+  title: string;
+  artist: string;
+  thumbnail: string;
+  durationMs?: number;
+}
+
+export interface ArtistRelease {
+  browseId: string;
+  title: string;
+  thumbnail: string;
+  year?: string;
+}
+
+export interface ArtistPage {
+  browseId: string;
+  name: string;
+  thumbnail: string;
+  description?: string;
+  topSongs: ArtistTopSong[];
+  albums: ArtistRelease[];
+  singles: ArtistRelease[];
+}
+
+export async function getArtistPage(browseId: string): Promise<ArtistPage | null> {
+  try {
+    const res: any = await webRequest('browse', { browseId });
+    const immersive: any = res?.header?.musicImmersiveHeaderRenderer
+      ?? res?.header?.musicVisualHeaderRenderer ?? {};
+    const name: string = immersive?.title?.runs?.[0]?.text ?? '';
+    const thumbnail: string =
+      (immersive?.thumbnail ?? immersive?.foregroundThumbnail)
+        ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
+    const description: string | undefined = immersive?.description?.runs?.[0]?.text;
+
+    const tabs: any[] =
+      res?.contents?.singleColumnBrowseResultsRenderer?.tabs ?? [];
+    const sections: any[] =
+      tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents ?? [];
+
+    // Top songs
+    const topSongs: ArtistTopSong[] = [];
+    const topShelf: any = sections[0]?.musicShelfRenderer;
+    for (const item of topShelf?.contents ?? []) {
+      const r: any = item?.musicResponsiveListItemRenderer;
+      if (!r) continue;
+      const videoId: string = r.flexColumns?.[0]
+        ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
+        ?.navigationEndpoint?.watchEndpoint?.videoId ?? '';
+      const title: string = r.flexColumns?.[0]
+        ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
+      const artistStr: string = r.flexColumns?.[1]
+        ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? name;
+      const thumb: string = r.thumbnail
+        ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
+      if (videoId && title) topSongs.push({ videoId, title, artist: artistStr, thumbnail: thumb });
+    }
+
+    // Albums and singles from carousels
+    const albums: ArtistRelease[] = [];
+    const singles: ArtistRelease[] = [];
+
+    for (let i = 1; i < sections.length; i++) {
+      const carousel: any = sections[i]?.musicCarouselShelfRenderer;
+      if (!carousel) continue;
+      const carouselTitle: string =
+        carousel?.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text ?? '';
+      const isSingles = /single|ep/i.test(carouselTitle);
+      const isAlbums = !isSingles && /álbum|album/i.test(carouselTitle);
+      if (!isSingles && !isAlbums) continue;
+
+      const target = isSingles ? singles : albums;
+      for (const item of carousel?.contents ?? []) {
+        const two: any = item?.musicTwoRowItemRenderer;
+        if (!two) continue;
+        const releaseTitle: string = two?.title?.runs?.[0]?.text ?? '';
+        const releaseBrowseId: string =
+          two?.navigationEndpoint?.browseEndpoint?.browseId ?? '';
+        const releaseThumbnail: string =
+          two?.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url
+          ?? two?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
+        const year: string | undefined = two?.subtitle?.runs?.find(
+          (r: any) => /^\d{4}$/.test(r.text ?? '')
+        )?.text;
+        if (releaseTitle && releaseBrowseId) {
+          target.push({ browseId: releaseBrowseId, title: releaseTitle, thumbnail: releaseThumbnail, year });
+        }
+      }
+    }
+
+    return { browseId, name, thumbnail, description, topSongs, albums, singles };
+  } catch {
+    return null;
+  }
+}
 
 export async function search(query: string): Promise<SearchResult[]> {
-  const res = await webRequest('search', {
-    query,
-    params: SEARCH_SONGS_PARAMS,
-  });
+  // Sem params = resultados mistos: artistas + músicas + álbuns
+  const res = await webRequest('search', { query });
 
   const results: SearchResult[] = [];
+  const seenBrowseIds = new Set<string>();
+  const seenVideoIds = new Set<string>();
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sections: any[] = res?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]
       ?.tabRenderer?.content?.sectionListRenderer?.contents ?? [];
 
     for (const section of sections) {
-      const shelf = section?.musicShelfRenderer;
-      if (!shelf?.contents) continue;
-      for (const item of shelf.contents) {
-        const r = item?.musicResponsiveListItemRenderer;
+      // Artista em destaque (musicCardShelfRenderer) — aparece quando a query é um nome de artista
+      const card: any = section?.musicCardShelfRenderer;
+      if (card) {
+        const ep: any = card?.onTap?.browseEndpoint;
+        const cardBrowseId: string = ep?.browseId ?? '';
+        const cardPageType: string =
+          ep?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType ?? '';
+        if (cardBrowseId && cardPageType === 'MUSIC_PAGE_TYPE_ARTIST' && !seenBrowseIds.has(cardBrowseId)) {
+          seenBrowseIds.add(cardBrowseId);
+          results.push({
+            type: 'artist',
+            browseId: cardBrowseId,
+            name: card?.title?.runs?.[0]?.text ?? '',
+            thumbnail: card?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '',
+            subtitle: card?.subtitle?.runs?.[0]?.text ?? '',
+          });
+        }
+        continue; // músicas dentro do card são do artista, não acrescentamos aqui
+      }
+
+      // Seções normais (itemSectionRenderer)
+      const sectionContents: any[] = section?.itemSectionRenderer?.contents
+        ?? section?.musicShelfRenderer?.contents ?? [];
+
+      for (const item of sectionContents) {
+        const r: any = item?.musicResponsiveListItemRenderer;
         if (!r) continue;
 
-        const videoId: string | undefined = r.flexColumns?.[0]
+        // Artista via navigationEndpoint direto no renderer
+        const navEp: any = r?.navigationEndpoint;
+        const navBrowseEp: any = navEp?.browseEndpoint;
+        const navPageType: string =
+          navBrowseEp?.browseEndpointContextSupportedConfigs
+            ?.browseEndpointContextMusicConfig?.pageType ?? '';
+
+        if (navPageType === 'MUSIC_PAGE_TYPE_ARTIST') {
+          const artistBrowseId: string = navBrowseEp?.browseId ?? '';
+          if (artistBrowseId && !seenBrowseIds.has(artistBrowseId)) {
+            seenBrowseIds.add(artistBrowseId);
+            const artistName: string = r.flexColumns?.[0]
+              ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
+            const artistThumb: string = r.thumbnail
+              ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
+            results.push({ type: 'artist', browseId: artistBrowseId, name: artistName, thumbnail: artistThumb, subtitle: '' });
+          }
+          continue;
+        }
+
+        // Música (watchEndpoint em flexColumns[0])
+        const videoId: string = r.flexColumns?.[0]
           ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
-          ?.navigationEndpoint?.watchEndpoint?.videoId;
+          ?.navigationEndpoint?.watchEndpoint?.videoId ?? '';
+        if (!videoId || seenVideoIds.has(videoId)) continue;
+        seenVideoIds.add(videoId);
 
         const title: string = r.flexColumns?.[0]
           ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
-
         const artist: string = r.flexColumns?.[1]
           ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
-
         const duration: string = r.flexColumns?.[1]
           ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.at?.(-1)?.text ?? '';
-
         const thumbnail: string = r.thumbnail
           ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
 
-        if (videoId) {
-          results.push({ videoId, title, artist, duration, thumbnail });
-        }
+        if (title) results.push({ type: 'song', videoId, title, artist, duration, thumbnail });
       }
     }
   } catch { /* parse error */ }

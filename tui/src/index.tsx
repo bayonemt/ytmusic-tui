@@ -8,7 +8,9 @@ import path from 'path';
 import {
   search, getStreamUrl, clearStreamCache, getNextQueue, getFeed, getPlaylistTracks,
   getUserPlaylists, likeVideo, addVideoToPlaylist, startDeviceFlow, pollDeviceFlow, isAuthenticated,
-  type SearchResult, type HomePlaylist, type PlaylistTrack, type FeedItem, type FeedSection,
+  getArtistPage,
+  type SearchResult, type SongSearchResult, type ArtistSearchResult, type ArtistPage,
+  type HomePlaylist, type PlaylistTrack, type FeedItem, type FeedSection,
 } from './innertube.js';
 import { AudioPlayer, type PlayerStatus } from './player.js';
 import { findBestStream, type HifiResult } from './hifi.js';
@@ -701,8 +703,8 @@ function SearchScreen({
   useEffect(() => {
     if (!submitted) return;
     const visible = results.slice(Math.max(0, cursor - 2), cursor + 5);
-    visible.forEach(r => { if (r.videoId) prefetchArt(r.videoId, 30, 14); });
-    prefetchLyricsQuality(visible.filter(r => r.videoId).map(r => ({
+    visible.forEach(r => { if (r.type === 'song') prefetchArt(r.videoId, 30, 14); });
+    prefetchLyricsQuality(visible.filter((r): r is SongSearchResult => r.type === 'song').map(r => ({
       videoId: r.videoId, title: r.title, artist: r.artist,
     })));
   }, [cursor, results, submitted]);
@@ -742,6 +744,15 @@ function SearchScreen({
 
             {results.slice(0, 14).map((r, i) => {
               const isSel = i === cursor;
+              if (r.type === 'artist') {
+                return (
+                  <Box key={`sr-${i}`}>
+                    <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+                    <Text bold color={isSel ? 'magenta' : 'white'} dimColor={!isSel} wrap="truncate">{r.name}</Text>
+                    <Text color="magenta" dimColor>  Artista</Text>
+                  </Box>
+                );
+              }
               return (
                 <Box key={`sr-${i}`}>
                   <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
@@ -762,15 +773,27 @@ function SearchScreen({
             </Box>
           </Box>
 
-          {/* Painel direito: capa da música em destaque */}
+          {/* Painel direito: capa/thumbnail em destaque */}
           {selected && (
             <Box flexDirection="column" width={30} flexShrink={0}>
-              <AlbumArt videoId={selected.videoId} width={30} height={14}
-                        directRow={artRow} directColFromRight={30} />
+              {selected.type === 'song'
+                ? <AlbumArt videoId={selected.videoId} width={30} height={14}
+                             directRow={artRow} directColFromRight={30} />
+                : null}
               <Box marginTop={1} flexDirection="column">
-                <Text bold color="white" wrap="truncate">{selected.title}</Text>
-                <Text color="white" dimColor wrap="truncate">{selected.artist}</Text>
-                {selected.duration && <Text color="red">{selected.duration}</Text>}
+                {selected.type === 'song' ? (
+                  <>
+                    <Text bold color="white" wrap="truncate">{selected.title}</Text>
+                    <Text color="white" dimColor wrap="truncate">{selected.artist}</Text>
+                    {selected.duration && <Text color="red">{selected.duration}</Text>}
+                  </>
+                ) : (
+                  <>
+                    <Text bold color="magenta" wrap="truncate">{selected.name}</Text>
+                    <Text color="white" dimColor>Artista</Text>
+                    <Text color="gray" dimColor wrap="truncate">Enter para ver perfil</Text>
+                  </>
+                )}
               </Box>
             </Box>
           )}
@@ -898,6 +921,144 @@ function PlaylistTracksScreen({
 
       <Box marginTop={1}>
         <Text color="white" dimColor>↑↓ navegar   Enter = tocar a partir daqui   Esc = voltar</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ── Tela: Artista ────────────────────────────────────────────────
+
+type ArtistItem =
+  | { kind: 'song'; videoId: string; title: string; artist: string; thumbnail: string }
+  | { kind: 'release'; browseId: string; title: string; year?: string; section: 'album' | 'single' };
+
+function ArtistScreen({
+  page, loading, onSelectSong, onSelectRelease, onBack,
+}: {
+  page: ArtistPage | null;
+  loading: boolean;
+  onSelectSong: (videoId: string, title: string, artist: string) => void;
+  onSelectRelease: (browseId: string) => void;
+  onBack: () => void;
+}) {
+  const [cursor, setCursor] = useState(0);
+
+  // Flat list of selectable items (songs + releases)
+  const items: ArtistItem[] = useMemo(() => {
+    if (!page) return [];
+    const list: ArtistItem[] = [];
+    for (const s of page.topSongs)
+      list.push({ kind: 'song', videoId: s.videoId, title: s.title, artist: s.artist, thumbnail: s.thumbnail });
+    for (const a of page.albums)
+      list.push({ kind: 'release', browseId: a.browseId, title: a.title, year: a.year, section: 'album' });
+    for (const s of page.singles)
+      list.push({ kind: 'release', browseId: s.browseId, title: s.title, year: s.year, section: 'single' });
+    return list;
+  }, [page]);
+
+  // Pré-busca qualidade de letras das top songs
+  useEffect(() => {
+    if (!page?.topSongs.length) return;
+    prefetchLyricsQuality(page.topSongs.map(s => ({
+      videoId: s.videoId, title: s.title, artist: s.artist,
+    })));
+  }, [page]);
+
+  useInput((input, key) => {
+    if (key.escape || input === 'h' || input === '/') { onBack(); return; }
+    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(items.length - 1, c + 1));
+    if (key.return) {
+      const it = items[cursor];
+      if (!it) return;
+      if (it.kind === 'song') onSelectSong(it.videoId, it.title, it.artist);
+      else onSelectRelease(it.browseId);
+    }
+  });
+
+  if (loading) return (
+    <Box flexDirection="column" paddingX={1}>
+      <Text color="red">● Carregando artista...</Text>
+    </Box>
+  );
+
+  if (!page) return (
+    <Box flexDirection="column" paddingX={1}>
+      <Text color="red">Artista não encontrado.</Text>
+    </Box>
+  );
+
+  // Compute section boundaries for rendering headers
+  const songCount = page.topSongs.length;
+  const albumCount = page.albums.length;
+
+  return (
+    <Box flexDirection="column" paddingX={1} flexGrow={1}>
+      {/* Artist name */}
+      <Box marginBottom={1}>
+        <Text bold color="magenta">{page.name}</Text>
+        {page.description && (
+          <Text color="white" dimColor>  {page.description.slice(0, 60)}</Text>
+        )}
+      </Box>
+
+      {/* Top songs */}
+      {page.topSongs.length > 0 && (
+        <Box marginBottom={1}>
+          <Text bold color="white" dimColor>Top músicas</Text>
+        </Box>
+      )}
+      {page.topSongs.map((s, i) => {
+        const idx = i;
+        const isSel = idx === cursor;
+        return (
+          <Box key={`song-${s.videoId}`}>
+            <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+            <Text color="white" dimColor={!isSel} bold={isSel} wrap="truncate">{s.title}</Text>
+            <Text color="white" dimColor>  {s.artist}</Text>
+            <LyricsTag videoId={s.videoId} />
+          </Box>
+        );
+      })}
+
+      {/* Albums */}
+      {page.albums.length > 0 && (
+        <Box marginY={1}>
+          <Text bold color="white" dimColor>Álbuns</Text>
+        </Box>
+      )}
+      {page.albums.map((a, i) => {
+        const idx = songCount + i;
+        const isSel = idx === cursor;
+        return (
+          <Box key={`album-${a.browseId}`}>
+            <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+            <Text color="white" dimColor={!isSel} bold={isSel} wrap="truncate">{a.title}</Text>
+            {a.year && <Text color="white" dimColor>  {a.year}</Text>}
+          </Box>
+        );
+      })}
+
+      {/* Singles */}
+      {page.singles.length > 0 && (
+        <Box marginY={1}>
+          <Text bold color="white" dimColor>Singles e EPs</Text>
+        </Box>
+      )}
+      {page.singles.map((s, i) => {
+        const idx = songCount + albumCount + i;
+        const isSel = idx === cursor;
+        return (
+          <Box key={`single-${s.browseId}`}>
+            <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+            <Text color="white" dimColor={!isSel} bold={isSel} wrap="truncate">{s.title}</Text>
+            {s.year && <Text color="white" dimColor>  {s.year}</Text>}
+          </Box>
+        );
+      })}
+
+      <Box marginTop={1}>
+        <Text color="gray" dimColor>↑↓ navegar   Enter = tocar/abrir   Esc = voltar</Text>
       </Box>
     </Box>
   );
@@ -1323,6 +1484,8 @@ function App() {
   const [openPlaylistName, setOpenPlaylistName] = useState('');
   const [openPlaylistTracksLoading, setOpenPlaylistTracksLoading] = useState(false);
   const [openPlaylistTrackCursor, setOpenPlaylistTrackCursor] = useState(0);
+  const [openArtistPage, setOpenArtistPage] = useState<ArtistPage | null>(null);
+  const [openArtistLoading, setOpenArtistLoading] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
   const loadingNext = useRef(false);
   const isLoadingTrack = useRef(false);
@@ -1606,15 +1769,22 @@ function App() {
   }, [playTrack]);
 
   const handleSearchSelect = useCallback(async (item: SearchResult) => {
-    // Mantém na busca durante o carregamento — evita que Enter na home
-    // inicie um playTrack concorrente enquanto o yt-dlp ainda está rodando
+    if (item.type === 'artist') {
+      // Carrega a página do artista
+      setOpenArtistPage(null);
+      setOpenArtistLoading(true);
+      setTab('search');
+      const page = await getArtistPage(item.browseId);
+      setOpenArtistLoading(false);
+      setOpenArtistPage(page);
+      return;
+    }
+    // Música — toca imediatamente
     setContentLoading(true);
     const newQueue: QueueItem[] = [{ videoId: item.videoId, title: item.title, artist: item.artist }];
     setQueue(newQueue);
-    // Troca para home depois que a fila está definida
     setTab('home');
     await playTrack(item.videoId, item.title, item.artist, 0);
-    // Carrega fila de músicas relacionadas em background
     getNextQueue(item.videoId).then(next => {
       setQueue(q => [...q.slice(0, 1), ...next.map(n => ({ videoId: n.videoId, title: n.title, artist: n.artist }))]);
     }).catch(() => {});
@@ -1648,7 +1818,22 @@ function App() {
             }
           />
         )}
-        {tab === 'search' && (
+        {tab === 'search' && (openArtistPage !== null || openArtistLoading) && (
+          <ArtistScreen
+            page={openArtistPage}
+            loading={openArtistLoading}
+            onSelectSong={(videoId, title, artist) => {
+              setOpenArtistPage(null);
+              handleSearchSelect({ type: 'song', videoId, title, artist, duration: '', thumbnail: '' });
+            }}
+            onSelectRelease={(browseId) => {
+              setOpenArtistPage(null);
+              handleOpenPlaylist({ browseId, title: '', subtitle: '', thumbnail: '', params: '' });
+            }}
+            onBack={() => { setOpenArtistPage(null); setOpenArtistLoading(false); }}
+          />
+        )}
+        {tab === 'search' && openArtistPage === null && !openArtistLoading && (
           <SearchScreen onSelect={handleSearchSelect} onBack={() => setTab('home')} />
         )}
         {tab === 'playlists' && openPlaylistTracks === null && (
