@@ -1828,6 +1828,7 @@ function App() {
             }}
             onSelectRelease={(browseId) => {
               setOpenArtistPage(null);
+              setTab('playlists');
               handleOpenPlaylist({ browseId, title: '', subtitle: '', thumbnail: '', params: '' });
             }}
             onBack={() => { setOpenArtistPage(null); setOpenArtistLoading(false); }}
