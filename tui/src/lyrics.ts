@@ -147,6 +147,108 @@ async function safeFetch(url: string, opts?: RequestInit & { signal?: AbortSigna
   }
 }
 
+// ── Beautiful Lyrics Reborn (yeahnangua) ─────────────────────────
+// Backend: https://lyrics.txw.qzz.io (Cloudflare Worker)
+// Syllable-level: QQ Music QRC + Apple Music via Paxsenix + Kugou + Deezer
+// Line-level: múltiplos providers (Apple, Deezer, LRCLIB, YouTube…)
+// Não exige auth real — token dummy funciona quando title+artist são passados.
+
+const BLR_BASE = 'https://lyrics.txw.qzz.io';
+const BLR_DUMMY_ID = '0000000000000000000000';
+
+function parseBLRSyllable(content: any[]): LyricLine[] {
+  const lines: LyricLine[] = [];
+  for (const entry of content) {
+    if (entry.Type !== 'Vocal') continue;
+    const lead = entry.Lead;
+    if (!Array.isArray(lead?.Syllables) || lead.Syllables.length === 0) continue;
+
+    const words: LyricWord[] = [];
+    let group: any[] = [];
+
+    const flushGroup = () => {
+      if (group.length === 0) return;
+      const text = group.map((s: any) => s.Text).join('');
+      const startMs = Math.round(group[0].StartTime * 1000);
+      const endMs   = Math.round(group[group.length - 1].EndTime * 1000);
+      if (group.length === 1) {
+        words.push({ startMs, endMs, text });
+      } else {
+        const syls: LyricSyllable[] = group.map((s: any, i: number) => ({
+          startMs: Math.round(s.StartTime * 1000),
+          endMs: i < group.length - 1 ? Math.round(group[i + 1].StartTime * 1000) : Math.round(s.EndTime * 1000),
+          text: s.Text,
+        }));
+        words.push({ startMs, endMs, text, syllables: syls });
+      }
+      group = [];
+    };
+
+    for (const syl of lead.Syllables) {
+      group.push(syl);
+      if (!syl.IsPartOfWord) flushGroup(); // false = última sílaba da palavra
+    }
+    flushGroup(); // trailing syllables (raro)
+
+    if (words.length === 0) continue;
+    lines.push({
+      timeMs: Math.round(lead.StartTime * 1000),
+      endMs:  Math.round(lead.EndTime * 1000),
+      text: words.map(w => w.text).join(' '),
+      words,
+    });
+  }
+  return lines;
+}
+
+function parseBLRLine(content: any[]): LyricLine[] {
+  const lines: LyricLine[] = [];
+  for (const entry of content) {
+    if (entry.Type !== 'Vocal') continue;
+    const text = (entry.Text ?? '').trim();
+    if (!text) continue;
+    lines.push({
+      timeMs: Math.round(entry.StartTime * 1000),
+      endMs:  Math.round(entry.EndTime * 1000),
+      text,
+      words: [],
+    });
+  }
+  return lines;
+}
+
+async function fetchBeautifulLyrics(
+  title: string, artist: string, durationSec: number, signal?: AbortSignal,
+): Promise<LyricLine[] | null> {
+  try {
+    const url = new URL(`${BLR_BASE}/lyrics/${BLR_DUMMY_ID}`);
+    url.searchParams.set('track_name', title);
+    url.searchParams.append('artist_name', artist);
+    if (durationSec > 0) url.searchParams.set('duration', String(durationSec));
+
+    const r = await safeFetch(url.toString(), {
+      signal,
+      headers: { Authorization: 'Bearer x' },
+    });
+    if (!r?.ok) return null;
+    const text = await r.text();
+    if (!text.trim()) return null;
+
+    const data = JSON.parse(text) as any;
+    if (data.Type === 'Syllable') {
+      const lines = parseBLRSyllable(data.Content ?? []);
+      if (lines.length > 0) return lines;
+    }
+    if (data.Type === 'Line') {
+      const lines = parseBLRLine(data.Content ?? []);
+      if (lines.length > 0) return lines;
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+  }
+  return null;
+}
+
 // ── LyricsPlus API (ibratabian17) ────────────────────────────────
 // Agrega Apple Music (syllable), Musixmatch-word e lyricsplus community.
 // Mirrors testados em cascata: prjktla.my.id → binimum.org → atomix.one
@@ -335,15 +437,19 @@ export async function fetchLyrics(
     }
   }
 
-  // 2. LyricsPlus — syllable (Apple Music) + word (Musixmatch), ampla cobertura
+  // 2. Beautiful Lyrics Reborn — syllable (QQ Music, Apple, Deezer) + line
+  const blr = await fetchBeautifulLyrics(title, artist, durationSec, signal);
+  if (blr && blr.length > 0) return blr;
+
+  // 3. LyricsPlus — syllable (Apple Music) + word (Musixmatch), ampla cobertura
   const lp = await fetchLyricsPlus(title, artist, durationSec, signal);
   if (lp && lp.length > 0) return lp;
 
-  // 3. Musixmatch — subtitle line-level via trial token
+  // 4. Musixmatch — subtitle line-level via trial token
   const mxm = await fetchMusixmatch(title, artist, signal);
   if (mxm && mxm.length > 0) return mxm;
 
-  // 4. LRCLib /api/get (match exato por título + artista + duração)
+  // 5. LRCLib /api/get (match exato por título + artista + duração)
   if (artist && durationSec > 0) {
     const getUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}&duration=${Math.round(durationSec)}`;
     const r2 = await safeFetch(getUrl, { signal });
@@ -356,7 +462,7 @@ export async function fetchLyrics(
     }
   }
 
-  // 5. LRCLib /api/search — ordena por correspondência de artista para evitar
+  // 6. LRCLib /api/search — ordena por correspondência de artista para evitar
   //    pegar uma música homônima em outra língua
   const searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}${artist ? `&artist_name=${encodeURIComponent(artist)}` : ''}`;
   const r3 = await safeFetch(searchUrl, { signal });

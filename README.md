@@ -9,7 +9,7 @@ Plays music from YouTube Music via the Innertube API, then silently finds a high
 - **YouTube Music integration** — home feed, search, playlists, queue, liked songs
 - **Auto hi-fi upgrade** — starts playing from YouTube, upgrades to the best available lossless source in the background
 - **Hi-res cascade**: Qobuz FLAC 24-bit 192kHz → Qobuz FLAC 24-bit 96kHz → Tidal FLAC → JioSaavn MP3 320kbps → SoundCloud 256kbps
-- **Karaoke lyrics** — syllable-by-syllable (Apple Music TTML via LyricsPlus), word-by-word, or line-by-line sync
+- **Karaoke lyrics** — syllable-by-syllable (Apple Music TTML · QQ Music · Kugou · Deezer), word-by-word, or line-by-line sync
 - **Lyrics quality tags** — `≋` syllable · `≈` word · `♩` line — visible before playing, in all list views
 - **Album art** — rendered in the terminal via Kitty Graphics Protocol
 - **Download** — saves in the best available quality (FLAC when possible), with square-cropped cover art embedded
