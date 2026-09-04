@@ -291,9 +291,9 @@ export async function getArtistPage(browseId: string): Promise<ArtistPage | null
       const carousel: any = sections[i]?.musicCarouselShelfRenderer;
       if (!carousel) continue;
       const carouselTitle: string =
-        carousel?.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text ?? '';
-      const isSingles = /single|ep/i.test(carouselTitle);
-      const isAlbums = !isSingles && /álbum|album/i.test(carouselTitle);
+        (carousel?.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text ?? '').toLowerCase();
+      const isSingles = /single|ep/.test(carouselTitle);
+      const isAlbums = !isSingles && /álbuns?|albums?/.test(carouselTitle);
       if (!isSingles && !isAlbums) continue;
 
       const target = isSingles ? singles : albums;
