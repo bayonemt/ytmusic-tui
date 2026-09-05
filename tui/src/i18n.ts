@@ -77,6 +77,7 @@ const S: Record<string, [string, string]> = {
   'settings.lyrics.big':    ['Linha atual em destaque',    'Highlight current line'],
   'settings.lyrics.dim':    ['Escurecer linhas adjacentes','Dim adjacent lines'],
   'settings.lyrics.space':  ['Espaçamento entre letras',   'Letter spacing'],
+  'settings.lyrics.offset': ['Avanço das letras',           'Lyrics advance'],
 
   // ── Settings: Idioma tab ─────────────────────────────────────────
   'settings.lang.ui':       ['Idioma da interface', 'Interface language'],

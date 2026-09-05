@@ -26,6 +26,7 @@ interface LyricsConfig {
   bigCurrentLine:   boolean; // adiciona margem ao redor da linha ativa
   dimAdjacentLines: boolean; // escurece também as linhas ±1 (não só ±2)
   letterSpacing:    boolean; // espaço entre letras na linha ativa (visual maior)
+  syncOffsetMs:     number;  // avanço das letras em ms (+ = aparecem mais cedo)
 }
 interface LanguageConfig {
   uiLang:     string; // idioma da interface: 'pt' | 'en'
@@ -35,7 +36,7 @@ interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
 const DEFAULT_CONFIG: AppConfig = {
-  lyrics:   { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false },
+  lyrics:   { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false, syncOffsetMs: 0 },
   language: { uiLang: 'pt', lyricsLang: 'auto' },
 };
 
@@ -51,6 +52,8 @@ function loadConfig(): AppConfig {
         bigCurrentLine:   raw?.lyrics?.bigCurrentLine   ?? false,
         dimAdjacentLines: raw?.lyrics?.dimAdjacentLines ?? false,
         letterSpacing:    raw?.lyrics?.letterSpacing    ?? false,
+        syncOffsetMs:     typeof raw?.lyrics?.syncOffsetMs === 'number'
+          ? Math.max(-5000, Math.min(5000, raw.lyrics.syncOffsetMs)) : 0,
       },
       language: {
         uiLang:     UI_LANG_OPTIONS.includes(raw?.language?.uiLang)         ? raw.language.uiLang     : 'pt',
@@ -1218,13 +1221,15 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
   const [, forceUpdate] = useState(0);
   const linesRef = useRef<LyricLine[] | null>(null);
   linesRef.current = lines;
+  const syncOffsetRef = useRef(config.syncOffsetMs);
+  syncOffsetRef.current = config.syncOffsetMs; // atualizado a cada render
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const scheduleNext = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      const posMs = player.positionMs;
+      const posMs = player.positionMs + syncOffsetRef.current;
       const ls = linesRef.current;
 
       if (!ls || ls.length === 0) {
@@ -1306,8 +1311,8 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
     return () => clearInterval(id);
   }, []);
 
-  // posMs computado inline — sem state, sem re-renders extras
-  const posMs = player.positionMs;
+  // posMs computado inline com offset de sincronia aplicado
+  const posMs = player.positionMs + config.syncOffsetMs;
 
   let activeIdx = -1;
   if (lines) {
@@ -1445,17 +1450,20 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
   const [cursor, setCursor] = useState(0);
 
   type LyricsItem =
-    | { kind: 'number'; labelKey: string; field: keyof LyricsConfig; min: number; max: number }
+    | { kind: 'number'; labelKey: string; field: keyof LyricsConfig; min: number; max: number; step?: number; format?: (v: number) => string }
     | { kind: 'bool';   labelKey: string; field: keyof LyricsConfig };
 
   type LangItem =
     | { kind: 'cycle'; labelKey: string; field: keyof LanguageConfig; options: string[]; labels: Record<string, string> };
 
+  const fmtOffset = (v: number) => v === 0 ? '0 ms' : `${v > 0 ? '+' : ''}${v} ms`;
+
   const lyricsItems: LyricsItem[] = [
-    { kind: 'number', labelKey: 'settings.lyrics.ctx',   field: 'contextLines',     min: 1, max: 10 },
-    { kind: 'bool',   labelKey: 'settings.lyrics.big',   field: 'bigCurrentLine' },
-    { kind: 'bool',   labelKey: 'settings.lyrics.dim',   field: 'dimAdjacentLines' },
-    { kind: 'bool',   labelKey: 'settings.lyrics.space', field: 'letterSpacing' },
+    { kind: 'number', labelKey: 'settings.lyrics.ctx',    field: 'contextLines',  min: 1,     max: 10 },
+    { kind: 'bool',   labelKey: 'settings.lyrics.big',    field: 'bigCurrentLine' },
+    { kind: 'bool',   labelKey: 'settings.lyrics.dim',    field: 'dimAdjacentLines' },
+    { kind: 'bool',   labelKey: 'settings.lyrics.space',  field: 'letterSpacing' },
+    { kind: 'number', labelKey: 'settings.lyrics.offset', field: 'syncOffsetMs',  min: -5000, max: 5000, step: 50, format: fmtOffset },
   ];
 
   const langItems: LangItem[] = [
@@ -1492,8 +1500,9 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
       const item = lyricsItems[cursor];
       if (!item) return;
       if (item.kind === 'number') {
-        if (goLeft)  patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - 1) });
-        if (goRight) patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + 1) });
+        const step = item.step ?? 1;
+        if (goLeft)  patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - step) });
+        if (goRight) patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + step) });
       }
       if (item.kind === 'bool') {
         if (goLeft)      patchLyrics({ [item.field]: false });
@@ -1543,7 +1552,7 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
             {item.kind === 'number' && (
               <>
                 <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
-                <Text bold color="white">{String(val)}</Text>
+                <Text bold color="white">{item.format ? item.format(val as number) : String(val)}</Text>
                 <Text color={isSel ? 'red' : 'gray'} dimColor>{' →'}</Text>
               </>
             )}
