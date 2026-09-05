@@ -16,6 +16,7 @@ import { AudioPlayer, type PlayerStatus } from './player.js';
 import { findBestStream, type HifiResult } from './hifi.js';
 import { fetchLyrics, type LyricLine, type LyricWord } from './lyrics.js';
 import { renderArt, prefetchArt, supportsNativeImages, injectKittyId } from './art.js';
+import { t, setLang } from './i18n.js';
 
 type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth';
 
@@ -25,16 +26,21 @@ interface LyricsConfig {
   bigCurrentLine:   boolean; // adiciona margem ao redor da linha ativa
   dimAdjacentLines: boolean; // escurece também as linhas ±1 (não só ±2)
   letterSpacing:    boolean; // espaço entre letras na linha ativa (visual maior)
-  lyricsLang:       string;  // idioma preferido: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
 }
-interface AppConfig { lyrics: LyricsConfig; }
+interface LanguageConfig {
+  uiLang:     string; // idioma da interface: 'pt' | 'en'
+  lyricsLang: string; // idioma das letras: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
+}
+interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
 const DEFAULT_CONFIG: AppConfig = {
-  lyrics: { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false, lyricsLang: 'auto' },
+  lyrics:   { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false },
+  language: { uiLang: 'pt', lyricsLang: 'auto' },
 };
 
-const LANG_OPTIONS = ['auto', 'en', 'pt', 'es', 'ja', 'ko', 'zh'];
+const UI_LANG_OPTIONS     = ['pt', 'en'];
+const LYRICS_LANG_OPTIONS = ['auto', 'en', 'pt', 'es', 'ja', 'ko', 'zh'];
 
 function loadConfig(): AppConfig {
   try {
@@ -45,7 +51,10 @@ function loadConfig(): AppConfig {
         bigCurrentLine:   raw?.lyrics?.bigCurrentLine   ?? false,
         dimAdjacentLines: raw?.lyrics?.dimAdjacentLines ?? false,
         letterSpacing:    raw?.lyrics?.letterSpacing    ?? false,
-        lyricsLang:       LANG_OPTIONS.includes(raw?.lyrics?.lyricsLang) ? raw.lyrics.lyricsLang : 'auto',
+      },
+      language: {
+        uiLang:     UI_LANG_OPTIONS.includes(raw?.language?.uiLang)         ? raw.language.uiLang     : 'pt',
+        lyricsLang: LYRICS_LANG_OPTIONS.includes(raw?.language?.lyricsLang) ? raw.language.lyricsLang : 'auto',
       },
     };
   } catch { return DEFAULT_CONFIG; }
@@ -313,13 +322,13 @@ function TopBar({ tab }: { tab: NavTab }) {
     <Box borderStyle="single" paddingX={1} borderColor="red">
       <Text color="red" bold>▶</Text>
       <Text bold color="white"> YouTube Music  </Text>
-      <Text color={tab === 'home'      ? 'red' : 'white'} bold={tab === 'home'}      dimColor={tab !== 'home'}>  Início[h]  </Text>
-      <Text color={tab === 'search'    ? 'red' : 'white'} bold={tab === 'search'}    dimColor={tab !== 'search'}>  Buscar[/]  </Text>
-      <Text color={tab === 'playlists' ? 'red' : 'white'} bold={tab === 'playlists'} dimColor={tab !== 'playlists'}>  Playlists[p]  </Text>
-      <Text color={tab === 'queue'     ? 'red' : 'white'} bold={tab === 'queue'}     dimColor={tab !== 'queue'}>  Fila[l]  </Text>
-      <Text color={tab === 'lyrics'    ? 'red' : 'white'} bold={tab === 'lyrics'}    dimColor={tab !== 'lyrics'}>  Letras[L]  </Text>
-      <Text color={tab === 'settings'  ? 'red' : 'white'} bold={tab === 'settings'}  dimColor={tab !== 'settings'}>  Config[s]  </Text>
-      <Text color={tab === 'auth'      ? 'red' : 'white'} bold={tab === 'auth'}      dimColor={tab !== 'auth'}>  Login[a]  </Text>
+      <Text color={tab === 'home'      ? 'red' : 'white'} bold={tab === 'home'}      dimColor={tab !== 'home'}>  {t('tab.home')}[h]  </Text>
+      <Text color={tab === 'search'    ? 'red' : 'white'} bold={tab === 'search'}    dimColor={tab !== 'search'}>  {t('tab.search')}[/]  </Text>
+      <Text color={tab === 'playlists' ? 'red' : 'white'} bold={tab === 'playlists'} dimColor={tab !== 'playlists'}>  {t('tab.playlists')}[p]  </Text>
+      <Text color={tab === 'queue'     ? 'red' : 'white'} bold={tab === 'queue'}     dimColor={tab !== 'queue'}>  {t('tab.queue')}[l]  </Text>
+      <Text color={tab === 'lyrics'    ? 'red' : 'white'} bold={tab === 'lyrics'}    dimColor={tab !== 'lyrics'}>  {t('tab.lyrics')}[L]  </Text>
+      <Text color={tab === 'settings'  ? 'red' : 'white'} bold={tab === 'settings'}  dimColor={tab !== 'settings'}>  {t('tab.settings')}[s]  </Text>
+      <Text color={tab === 'auth'      ? 'red' : 'white'} bold={tab === 'auth'}      dimColor={tab !== 'auth'}>  {t('tab.login')}[a]  </Text>
       <Text color="white" dimColor>   q=sair</Text>
     </Box>
   );
@@ -349,7 +358,7 @@ function PlayerBar({ status, hifiQuality }: { status: PlayerStatus; hifiQuality?
           <Text color="red" bold>{icon} </Text>
           {isActive
             ? <Text bold wrap="truncate">{status.title}</Text>
-            : <Text color="white">Nenhuma música tocando</Text>
+            : <Text color="white">{t('player.nothing')}</Text>
           }
         </Box>
         {isActive && <Text color="white"> {status.artist}</Text>}
@@ -729,7 +738,7 @@ function SearchScreen({
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Buscar músicas</Text>
+        <Text bold color="white">{t('search.title')}</Text>
       </Box>
 
       {!submitted ? (
@@ -739,7 +748,7 @@ function SearchScreen({
             value={query}
             onChange={setQuery}
             onSubmit={(q) => { setSubmitted(true); doSearch(q); }}
-            placeholder="Nome da música ou artista..."
+            placeholder={t('search.placeholder')}
           />
         </Box>
       ) : (
@@ -779,7 +788,7 @@ function SearchScreen({
             )}
 
             <Box marginTop={1}>
-              <Text color="gray" dimColor>↑↓ navegar   Enter = tocar   Esc = voltar</Text>
+              <Text color="gray" dimColor>{t('search.hint')}</Text>
             </Box>
           </Box>
 
@@ -862,7 +871,7 @@ function PlaylistsScreen({
       })}
 
       <Box marginTop={1}>
-        <Text color="white" dimColor>↑↓ navegar   Enter = abrir   / = buscar</Text>
+        <Text color="white" dimColor>{t('pl.hint')}</Text>
       </Box>
     </Box>
   );
@@ -930,7 +939,7 @@ function PlaylistTracksScreen({
       })}
 
       <Box marginTop={1}>
-        <Text color="white" dimColor>↑↓ navegar   Enter = tocar a partir daqui   Esc = voltar</Text>
+        <Text color="white" dimColor>{t('pl.hint.tracks')}</Text>
       </Box>
     </Box>
   );
@@ -988,7 +997,7 @@ function ArtistScreen({
 
   if (loading) return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="red">● Carregando artista...</Text>
+      <Text color="red">{t('artist.loading')}</Text>
     </Box>
   );
 
@@ -1015,7 +1024,7 @@ function ArtistScreen({
       {/* Top songs */}
       {page.topSongs.length > 0 && (
         <Box marginBottom={1}>
-          <Text bold color="white" dimColor>Top músicas</Text>
+          <Text bold color="white" dimColor>{t('artist.top')}</Text>
         </Box>
       )}
       {page.topSongs.map((s, i) => {
@@ -1034,7 +1043,7 @@ function ArtistScreen({
       {/* Albums */}
       {page.albums.length > 0 && (
         <Box marginY={1}>
-          <Text bold color="white" dimColor>Álbuns</Text>
+          <Text bold color="white" dimColor>{t('artist.albums')}</Text>
         </Box>
       )}
       {page.albums.map((a, i) => {
@@ -1052,7 +1061,7 @@ function ArtistScreen({
       {/* Singles */}
       {page.singles.length > 0 && (
         <Box marginY={1}>
-          <Text bold color="white" dimColor>Singles e EPs</Text>
+          <Text bold color="white" dimColor>{t('artist.singles')}</Text>
         </Box>
       )}
       {page.singles.map((s, i) => {
@@ -1068,7 +1077,7 @@ function ArtistScreen({
       })}
 
       <Box marginTop={1}>
-        <Text color="gray" dimColor>↑↓ navegar   Enter = tocar/abrir   Esc = voltar</Text>
+        <Text color="gray" dimColor>{t('artist.hint')}</Text>
       </Box>
     </Box>
   );
@@ -1103,15 +1112,15 @@ function QueueScreen({
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Fila de reprodução  </Text>
-        <Text color="gray" dimColor>({queue.length} músicas)  </Text>
-        <Text color="cyan" dimColor>≋ sílaba  </Text>
-        <Text color="blue" dimColor>≈ palavra  </Text>
-        <Text color="white" dimColor>♩ linha</Text>
+        <Text bold color="white">{t('queue.title')}  </Text>
+        <Text color="gray" dimColor>({queue.length} {t('queue.songs')})  </Text>
+        <Text color="cyan" dimColor>≋ {t('queue.syllable')}  </Text>
+        <Text color="blue" dimColor>≈ {t('queue.word')}  </Text>
+        <Text color="white" dimColor>♩ {t('queue.line')}</Text>
       </Box>
 
       {queue.length === 0 && (
-        <Text color="gray" dimColor>Fila vazia — busque uma música para começar.</Text>
+        <Text color="gray" dimColor>{t('queue.empty')}</Text>
       )}
 
       {queue.slice(0, 18).map((item, i) => {
@@ -1130,7 +1139,7 @@ function QueueScreen({
       })}
 
       <Box marginTop={1}>
-        <Text color="gray" dimColor>↑↓ navegar   Enter = pular para música</Text>
+        <Text color="gray" dimColor>{t('queue.hint')}</Text>
       </Box>
     </Box>
   );
@@ -1319,7 +1328,7 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
   if (status.state === 'idle' || !status.videoId) {
     return (
       <Box flexGrow={1} alignItems="center" justifyContent="center">
-        <Text color="gray" dimColor>Nenhuma música tocando</Text>
+        <Text color="gray" dimColor>{t('lyrics.nothing')}</Text>
       </Box>
     );
   }
@@ -1333,13 +1342,13 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
 
       {loading && (
         <Box justifyContent="center">
-          <Text color="gray" dimColor>♩ Buscando letras...</Text>
+          <Text color="gray" dimColor>{t('lyrics.loading')}</Text>
         </Box>
       )}
 
       {!loading && lines === null && (
         <Box justifyContent="center">
-          <Text color="gray" dimColor>Sem letras disponíveis</Text>
+          <Text color="gray" dimColor>{t('lyrics.none')}</Text>
         </Box>
       )}
 
@@ -1403,17 +1412,17 @@ function AuthScreen({ onDone }: { onDone: () => void }) {
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Login com conta Google</Text>
+        <Text bold color="white">{t('auth.title')}</Text>
       </Box>
-      {step === 'loading' && <Text color="red">● Iniciando autenticação...</Text>}
-      {step === 'error'   && <Text color="red">Erro ao iniciar. Tente novamente.</Text>}
-      {step === 'done'    && <Text color="red" bold>✓ Autenticado com sucesso!</Text>}
+      {step === 'loading' && <Text color="red">{t('auth.starting')}</Text>}
+      {step === 'error'   && <Text color="red">{t('auth.error')}</Text>}
+      {step === 'done'    && <Text color="red" bold>{t('auth.done')}</Text>}
       {step === 'code' && (
         <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={2} paddingY={1}>
-          <Text>1. Acesse: <Text color="red" bold>{verifyUrl}</Text></Text>
-          <Text>2. Digite o código: <Text color="red" bold>{userCode}</Text></Text>
+          <Text>{t('auth.step1')} <Text color="red" bold>{verifyUrl}</Text></Text>
+          <Text>{t('auth.step2')} <Text color="red" bold>{userCode}</Text></Text>
           <Box marginTop={1}>
-            <Text color="gray" dimColor>Aguardando confirmação...</Text>
+            <Text color="gray" dimColor>{t('auth.waiting')}</Text>
           </Box>
         </Box>
       )}
@@ -1423,75 +1432,114 @@ function AuthScreen({ onDone }: { onDone: () => void }) {
 
 // ── Tela: Configurações ─────────────────────────────────────────
 
-const LANG_LABELS: Record<string, string> = {
-  auto: 'Automático', en: 'English', pt: 'Português', es: 'Español',
+// Rótulos de idioma de letras (ficam fixos independente do uiLang)
+const LYRICS_LANG_LABELS: Record<string, string> = {
+  auto: 'Auto', en: 'English', pt: 'Português', es: 'Español',
   ja: '日本語', ko: '한국어', zh: '中文',
 };
 
+type SettingsTab = 'lyrics' | 'language';
+
 function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c: AppConfig) => void }) {
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('lyrics');
   const [cursor, setCursor] = useState(0);
 
-  type Item =
-    | { kind: 'number'; label: string; field: keyof LyricsConfig; min: number; max: number }
-    | { kind: 'bool';   label: string; field: keyof LyricsConfig }
-    | { kind: 'cycle';  label: string; field: keyof LyricsConfig; options: string[] };
+  type LyricsItem =
+    | { kind: 'number'; labelKey: string; field: keyof LyricsConfig; min: number; max: number }
+    | { kind: 'bool';   labelKey: string; field: keyof LyricsConfig };
 
-  const items: Item[] = [
-    { kind: 'number', label: 'Linhas de contexto',         field: 'contextLines',     min: 1, max: 10 },
-    { kind: 'bool',   label: 'Linha atual em destaque',    field: 'bigCurrentLine' },
-    { kind: 'bool',   label: 'Escurecer linhas adjacentes',field: 'dimAdjacentLines' },
-    { kind: 'bool',   label: 'Espaçamento entre letras',   field: 'letterSpacing' },
-    { kind: 'cycle',  label: 'Idioma das letras',          field: 'lyricsLang', options: LANG_OPTIONS },
+  type LangItem =
+    | { kind: 'cycle'; labelKey: string; field: keyof LanguageConfig; options: string[]; labels: Record<string, string> };
+
+  const lyricsItems: LyricsItem[] = [
+    { kind: 'number', labelKey: 'settings.lyrics.ctx',   field: 'contextLines',     min: 1, max: 10 },
+    { kind: 'bool',   labelKey: 'settings.lyrics.big',   field: 'bigCurrentLine' },
+    { kind: 'bool',   labelKey: 'settings.lyrics.dim',   field: 'dimAdjacentLines' },
+    { kind: 'bool',   labelKey: 'settings.lyrics.space', field: 'letterSpacing' },
   ];
+
+  const langItems: LangItem[] = [
+    { kind: 'cycle', labelKey: 'settings.lang.ui',     field: 'uiLang',     options: UI_LANG_OPTIONS,     labels: { pt: 'Português', en: 'English' } },
+    { kind: 'cycle', labelKey: 'settings.lang.lyrics', field: 'lyricsLang', options: LYRICS_LANG_OPTIONS, labels: LYRICS_LANG_LABELS },
+  ];
+
+  const currentItems = settingsTab === 'lyrics' ? lyricsItems : langItems;
 
   const patchLyrics = (patch: Partial<LyricsConfig>) => {
     const next = { ...config, lyrics: { ...config.lyrics, ...patch } };
-    onChange(next);
-    saveConfig(next);
+    onChange(next); saveConfig(next);
+  };
+  const patchLanguage = (patch: Partial<LanguageConfig>) => {
+    const next = { ...config, language: { ...config.language, ...patch } };
+    if (patch.uiLang) setLang(patch.uiLang);
+    onChange(next); saveConfig(next);
   };
 
   useInput((input, key) => {
-    if (key.upArrow)   setCursor(c => Math.max(0, c - 1));
-    if (key.downArrow) setCursor(c => Math.min(items.length - 1, c + 1));
+    // Tab switching com Tab ou [ ]
+    if (input === '[' || (key.tab && !key.shift)) {
+      setSettingsTab(t => t === 'lyrics' ? 'language' : 'lyrics');
+      setCursor(0); return;
+    }
 
-    const item = items[cursor];
-    const goLeft = key.leftArrow || input === '-';
+    if (key.upArrow)   setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(currentItems.length - 1, c + 1));
+
+    const goLeft  = key.leftArrow  || input === '-';
     const goRight = key.rightArrow || input === '+' || input === '=';
 
-    if (item.kind === 'number') {
-      if (goLeft)  patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - 1) });
-      if (goRight) patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + 1) });
-    }
-    if (item.kind === 'bool') {
-      if (goLeft)  patchLyrics({ [item.field]: false });
-      if (goRight) patchLyrics({ [item.field]: true });
-      if (key.return) patchLyrics({ [item.field]: !(config.lyrics[item.field]) });
-    }
-    if (item.kind === 'cycle') {
+    if (settingsTab === 'lyrics') {
+      const item = lyricsItems[cursor];
+      if (!item) return;
+      if (item.kind === 'number') {
+        if (goLeft)  patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - 1) });
+        if (goRight) patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + 1) });
+      }
+      if (item.kind === 'bool') {
+        if (goLeft)      patchLyrics({ [item.field]: false });
+        if (goRight)     patchLyrics({ [item.field]: true });
+        if (key.return)  patchLyrics({ [item.field]: !config.lyrics[item.field] });
+      }
+    } else {
+      const item = langItems[cursor];
+      if (!item) return;
       const opts = item.options;
-      const cur = opts.indexOf(config.lyrics[item.field] as string);
-      if (goLeft || key.return)  patchLyrics({ [item.field]: opts[(cur - 1 + opts.length) % opts.length] });
-      if (goRight) patchLyrics({ [item.field]: opts[(cur + 1) % opts.length] });
+      const cur = opts.indexOf(config.language[item.field] as string);
+      if (goLeft || key.return) patchLanguage({ [item.field]: opts[(cur - 1 + opts.length) % opts.length] });
+      if (goRight)              patchLanguage({ [item.field]: opts[(cur + 1) % opts.length] });
     }
   });
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Configurações</Text>
+        <Text bold color="white">{t('settings.title')}</Text>
       </Box>
 
-      <Box marginBottom={1} marginLeft={1}>
-        <Text bold color="red">Letras</Text>
+      {/* Abas */}
+      <Box flexDirection="row" marginBottom={1} gap={2}>
+        {(['lyrics', 'language'] as SettingsTab[]).map(tab => (
+          <Box key={tab}>
+            <Text
+              bold={settingsTab === tab}
+              color={settingsTab === tab ? 'red' : 'white'}
+              dimColor={settingsTab !== tab}
+            >
+              {t(`settings.tab.${tab}`)}
+            </Text>
+          </Box>
+        ))}
+        <Text color="gray" dimColor>  [ = trocar aba</Text>
       </Box>
 
-      {items.map((item, i) => {
+      {/* Itens da aba Letras */}
+      {settingsTab === 'lyrics' && lyricsItems.map((item, i) => {
         const isSel = i === cursor;
         const val = config.lyrics[item.field];
         return (
-          <Box key={item.field} flexDirection="row" marginLeft={2} marginBottom={0}>
+          <Box key={item.field} flexDirection="row" marginLeft={2}>
             <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
-            <Text color="white">{item.label}{'  '}</Text>
+            <Text color="white">{t(item.labelKey)}{'  '}</Text>
             {item.kind === 'number' && (
               <>
                 <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
@@ -1500,21 +1548,29 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
               </>
             )}
             {item.kind === 'bool' && (
-              <Text bold color={val ? 'green' : 'gray'}>{val ? 'Sim' : 'Não'}</Text>
-            )}
-            {item.kind === 'cycle' && (
-              <>
-                <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
-                <Text bold color="white">{LANG_LABELS[val as string] ?? String(val)}</Text>
-                <Text color={isSel ? 'red' : 'gray'} dimColor>{' →'}</Text>
-              </>
+              <Text bold color={val ? 'green' : 'gray'}>{val ? t('yes') : t('no')}</Text>
             )}
           </Box>
         );
       })}
 
+      {/* Itens da aba Idioma */}
+      {settingsTab === 'language' && langItems.map((item, i) => {
+        const isSel = i === cursor;
+        const val = config.language[item.field] as string;
+        return (
+          <Box key={item.field} flexDirection="row" marginLeft={2}>
+            <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+            <Text color="white">{t(item.labelKey)}{'  '}</Text>
+            <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
+            <Text bold color="white">{item.labels[val] ?? val}</Text>
+            <Text color={isSel ? 'red' : 'gray'} dimColor>{' →'}</Text>
+          </Box>
+        );
+      })}
+
       <Box marginTop={2} marginLeft={2}>
-        <Text color="gray" dimColor>↑↓ navegar   ←→ / Enter = alterar   h = voltar ao início</Text>
+        <Text color="gray" dimColor>{t('settings.hint')}</Text>
       </Box>
     </Box>
   );
@@ -1526,6 +1582,8 @@ function App() {
   const { exit } = useApp();
   const [tab, setTab] = useState<NavTab>('home');
   const [appConfig, setAppConfig] = useState<AppConfig>(loadConfig);
+  // Sincroniza o idioma da interface com a config (sem useEffect para evitar delay)
+  setLang(appConfig.language.uiLang);
   const [status, setStatus] = useState<PlayerStatus>(player.status);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [queueIdx, setQueueIdx] = useState(0);
@@ -1600,7 +1658,7 @@ function App() {
     lyricsCtrl.current = ctrl;
     setLyricsLines(null);
     setLyricsLoading(true);
-    fetchLyrics(status.title ?? '', status.artist ?? '', status.duration, ctrl.signal, appConfig.lyrics.lyricsLang)
+    fetchLyrics(status.title ?? '', status.artist ?? '', status.duration, ctrl.signal, appConfig.language.lyricsLang)
       .then(l => {
         if (ctrl.signal.aborted) return;
         setLyricsLines(l);
@@ -1613,7 +1671,7 @@ function App() {
       })
       .catch(() => { if (!ctrl.signal.aborted) setLyricsLoading(false); });
     return () => ctrl.abort();
-  }, [status.videoId, appConfig.lyrics.lyricsLang]);
+  }, [status.videoId, appConfig.language.lyricsLang]);
 
   // Background fetch de qualidade para músicas na fila (via cache global)
   useEffect(() => {
@@ -1858,7 +1916,7 @@ function App() {
       {contentLoading && (
         <Box paddingX={2}>
           <Text color="red">● </Text>
-          <Text color="white">Carregando...</Text>
+          <Text color="white">{t('loading')}</Text>
         </Box>
       )}
 
