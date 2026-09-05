@@ -1146,13 +1146,23 @@ function WordLine({ words, posMs }: { words: LyricWord[]; posMs: number }) {
         }
 
         if (isCurrent && word.syllables && word.syllables.length > 1) {
-          // Animação por sílaba: cada sílaba acende no seu startMs
+          // Fill char-a-char por sílaba: sílabas cantadas = branco, atual = fill progressivo, próximas = cinza
           return (
             <Box key={word.startMs} flexDirection="row">
               {word.syllables.map((syl) => {
                 const sylSung    = posMs >= syl.endMs;
                 const sylCurrent = !sylSung && posMs >= syl.startMs;
-                if (sylSung || sylCurrent) return <Text key={syl.startMs} bold color="white">{syl.text}</Text>;
+                if (sylSung) return <Text key={syl.startMs} bold color="white">{syl.text}</Text>;
+                if (sylCurrent) {
+                  const p      = Math.min(1, (posMs - syl.startMs) / Math.max(1, syl.endMs - syl.startMs));
+                  const filled = Math.floor(p * syl.text.length);
+                  return (
+                    <Box key={syl.startMs} flexDirection="row">
+                      {syl.text.slice(0, filled) && <Text bold color="white">{syl.text.slice(0, filled)}</Text>}
+                      {syl.text.slice(filled)    && <Text bold color="gray">{syl.text.slice(filled)}</Text>}
+                    </Box>
+                  );
+                }
                 return <Text key={syl.startMs} bold color="gray">{syl.text}</Text>;
               })}
               <Text bold color="gray"> </Text>
@@ -1215,9 +1225,21 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
           if (word.startMs > posMs) { nextBoundary = Math.min(nextBoundary, word.startMs); break; }
           if (word.endMs > posMs) {
             if (word.syllables && word.syllables.length > 1) {
-              // Dentro de palavra com sílabas: próxima fronteira de sílaba
+              // Sílabas: char-level dentro da sílaba atual + fronteira da próxima
+              const curSyl = word.syllables.find(s => s.startMs <= posMs && posMs < s.endMs);
               const nextSyl = word.syllables.find(s => s.startMs > posMs);
-              nextBoundary = Math.min(nextBoundary, nextSyl ? nextSyl.startMs : word.endMs);
+              if (curSyl) {
+                const nChars = curSyl.text.length;
+                if (nChars > 1) {
+                  const charDur   = (curSyl.endMs - curSyl.startMs) / nChars;
+                  const elapsed   = posMs - curSyl.startMs;
+                  const nextCharMs = curSyl.startMs + (Math.floor(elapsed / charDur) + 1) * charDur;
+                  nextBoundary = Math.min(nextBoundary, nextCharMs);
+                } else {
+                  nextBoundary = Math.min(nextBoundary, curSyl.endMs);
+                }
+              }
+              if (nextSyl) nextBoundary = Math.min(nextBoundary, nextSyl.startMs);
             } else {
               // Sem sílabas: fill char-a-char interpolado
               const nChars = word.text.length;

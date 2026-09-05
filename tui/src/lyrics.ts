@@ -249,6 +249,109 @@ async function fetchBeautifulLyrics(
   return null;
 }
 
+// ── Paxsenix / Lyrically API ─────────────────────────────────────
+// Proxy Apple Music via lyrics.paxsenix.org (formato v=2, word-level).
+// Fluxo: iTunes Search API (gratuita) → Apple Music track ID → Paxsenix v=2.
+// part:true = continuação fonética da palavra anterior (forma sílabas).
+const PAXSENIX_BASE = 'https://lyrics.paxsenix.org';
+
+function parsePaxsenixV2(data: any): LyricLine[] {
+  const raw: any[] = data.lyrics ?? [];
+  return raw
+    .filter(entry => !entry.background && Array.isArray(entry.text) && entry.text.length > 0)
+    .map(entry => {
+      // Agrupa tokens: part=true é sílaba da palavra anterior
+      const words: LyricWord[] = [];
+      let group: any[] = [];
+
+      const flushGroup = () => {
+        if (group.length === 0) return;
+        const startMs = group[0].timestamp as number;
+        const endMs   = group[group.length - 1].endtime as number;
+        const text    = group.map((w: any) => w.text).join('');
+        if (!text.trim()) { group = []; return; }
+        if (group.length === 1) {
+          words.push({ startMs, endMs, text });
+        } else {
+          const syllables: LyricSyllable[] = group.map((w: any, i: number) => ({
+            startMs: w.timestamp as number,
+            endMs: i < group.length - 1 ? (group[i + 1].timestamp as number) : (w.endtime as number),
+            text: w.text,
+          }));
+          words.push({ startMs, endMs, text, syllables });
+        }
+        group = [];
+      };
+
+      for (const w of entry.text as any[]) {
+        if (w.part && group.length > 0) {
+          group.push(w);
+        } else {
+          flushGroup();
+          group = [w];
+        }
+      }
+      flushGroup();
+
+      const lineText = (entry.text as any[]).map((w: any) => w.text).join(' ').trim();
+      return { timeMs: entry.timestamp as number, endMs: entry.endtime as number, text: lineText, words };
+    })
+    .filter(l => l.text);
+}
+
+async function fetchPaxsenix(
+  title: string, artist: string, durationSec: number, signal?: AbortSignal,
+): Promise<LyricLine[] | null> {
+  try {
+    // 1. Descobre Apple Music ID via iTunes Search (gratuita, sem auth)
+    const q = encodeURIComponent(`${title} ${artist}`);
+    const sr = await safeFetch(
+      `https://itunes.apple.com/search?term=${q}&entity=song&limit=8&media=music`,
+      { signal },
+    );
+    if (!sr?.ok) return null;
+    const sd = await sr.json() as { results?: any[] };
+    const results = sd.results ?? [];
+
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+    const nt = norm(title);
+    const na = norm(artist);
+    let bestId: number | null = null;
+    let bestScore = -1;
+
+    for (const r of results) {
+      const rt = norm(r.trackName ?? '');
+      const ra = norm(r.artistName ?? '');
+      let score = 0;
+      if (rt === nt) score += 4;
+      else if (rt.includes(nt) || nt.includes(rt)) score += 2;
+      if (ra === na) score += 3;
+      else if (ra.includes(na) || na.includes(ra)) score += 1;
+      if (durationSec > 0 && r.trackTimeMillis) {
+        const diff = Math.abs(r.trackTimeMillis / 1000 - durationSec);
+        if (diff < 5) score += 2;
+        else if (diff < 15) score += 1;
+      }
+      if (score > bestScore) { bestScore = score; bestId = r.trackId; }
+    }
+    if (!bestId || bestScore < 2) return null;
+
+    // 2. Busca lyrics no Paxsenix com formato v=2 (word-level JSON)
+    const lr = await safeFetch(
+      `${PAXSENIX_BASE}/apple-music/lyrics?id=${bestId}&v=2`,
+      { signal },
+    );
+    if (!lr?.ok) return null;
+    const data = await lr.json() as any;
+    if (!data.lyrics) return null;
+    const lines = parsePaxsenixV2(data);
+    return lines.length > 0 ? lines : null;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    return null;
+  }
+}
+
 // ── LyricsPlus API (ibratabian17) ────────────────────────────────
 // Agrega Apple Music (syllable), Musixmatch-word e lyricsplus community.
 // Mirrors testados em cascata: prjktla.my.id → binimum.org → atomix.one
@@ -437,19 +540,23 @@ export async function fetchLyrics(
     }
   }
 
-  // 2. Beautiful Lyrics Reborn — syllable (QQ Music, Apple, Deezer) + line
+  // 2. Paxsenix — word-level Apple Music via iTunes Search + cache Paxsenix
+  const pax = await fetchPaxsenix(title, artist, durationSec, signal);
+  if (pax && pax.length > 0) return pax;
+
+  // 3. Beautiful Lyrics Reborn — syllable (QQ Music, Apple, Deezer) + line
   const blr = await fetchBeautifulLyrics(title, artist, durationSec, signal);
   if (blr && blr.length > 0) return blr;
 
-  // 3. LyricsPlus — syllable (Apple Music) + word (Musixmatch), ampla cobertura
+  // 4. LyricsPlus — syllable (Apple Music) + word (Musixmatch), ampla cobertura
   const lp = await fetchLyricsPlus(title, artist, durationSec, signal);
   if (lp && lp.length > 0) return lp;
 
-  // 4. Musixmatch — subtitle line-level via trial token
+  // 5. Musixmatch — subtitle line-level via trial token
   const mxm = await fetchMusixmatch(title, artist, signal);
   if (mxm && mxm.length > 0) return mxm;
 
-  // 5. LRCLib /api/get (match exato por título + artista + duração)
+  // 6. LRCLib /api/get (match exato por título + artista + duração)
   if (artist && durationSec > 0) {
     const getUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}&duration=${Math.round(durationSec)}`;
     const r2 = await safeFetch(getUrl, { signal });
@@ -462,7 +569,7 @@ export async function fetchLyrics(
     }
   }
 
-  // 6. LRCLib /api/search — ordena por correspondência de artista para evitar
+  // 7. LRCLib /api/search — ordena por correspondência de artista para evitar
   //    pegar uma música homônima em outra língua
   const searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}${artist ? `&artist_name=${encodeURIComponent(artist)}` : ''}`;
   const r3 = await safeFetch(searchUrl, { signal });
