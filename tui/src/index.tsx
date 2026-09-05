@@ -21,21 +21,31 @@ type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' 
 
 // ── Configuração persistente ────────────────────────────────────────
 interface LyricsConfig {
-  contextLines: number;   // linhas acima e abaixo da atual (1–10)
-  bigCurrentLine: boolean; // adiciona margem ao redor da linha ativa
+  contextLines:     number;  // linhas acima e abaixo da atual (1–10)
+  bigCurrentLine:   boolean; // adiciona margem ao redor da linha ativa
+  dimAdjacentLines: boolean; // escurece também as linhas ±1 (não só ±2)
+  letterSpacing:    boolean; // espaço entre letras na linha ativa (visual maior)
+  lyricsLang:       string;  // idioma preferido: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
 }
 interface AppConfig { lyrics: LyricsConfig; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
-const DEFAULT_CONFIG: AppConfig = { lyrics: { contextLines: 3, bigCurrentLine: false } };
+const DEFAULT_CONFIG: AppConfig = {
+  lyrics: { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false, lyricsLang: 'auto' },
+};
+
+const LANG_OPTIONS = ['auto', 'en', 'pt', 'es', 'ja', 'ko', 'zh'];
 
 function loadConfig(): AppConfig {
   try {
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
     return {
       lyrics: {
-        contextLines:   Math.max(1, Math.min(10, raw?.lyrics?.contextLines ?? 3)),
-        bigCurrentLine: raw?.lyrics?.bigCurrentLine ?? false,
+        contextLines:     Math.max(1, Math.min(10, raw?.lyrics?.contextLines ?? 3)),
+        bigCurrentLine:   raw?.lyrics?.bigCurrentLine   ?? false,
+        dimAdjacentLines: raw?.lyrics?.dimAdjacentLines ?? false,
+        letterSpacing:    raw?.lyrics?.letterSpacing    ?? false,
+        lyricsLang:       LANG_OPTIONS.includes(raw?.lyrics?.lyricsLang) ? raw.lyrics.lyricsLang : 'auto',
       },
     };
   } catch { return DEFAULT_CONFIG; }
@@ -1131,9 +1141,12 @@ function QueueScreen({
 // Karaoke word-level fill: cada palavra tem seu estado calculado na hora.
 // Sung: branco bold. Palavra atual: preenchimento char a char (branco→cinza).
 // Upcoming: cinza dim.
-function WordLine({ words, posMs }: { words: LyricWord[]; posMs: number }) {
+function WordLine({ words, posMs, letterSpacing }: { words: LyricWord[]; posMs: number; letterSpacing?: boolean }) {
   const lastWord = words[words.length - 1];
   const allSung = lastWord != null && posMs >= lastWord.endMs;
+
+  // Com letterSpacing: insere espaços entre cada caractere
+  const spread = (s: string) => letterSpacing ? s.split('').join(' ') : s;
 
   return (
     <Box flexDirection="row" flexWrap="wrap">
@@ -1142,28 +1155,28 @@ function WordLine({ words, posMs }: { words: LyricWord[]; posMs: number }) {
         const isCurrent = !isSung && posMs >= word.startMs;
 
         if (isSung) {
-          return <Text key={word.startMs} bold color="white">{word.text} </Text>;
+          return <Text key={word.startMs} bold color="white">{spread(word.text)} </Text>;
         }
 
         if (isCurrent && word.syllables && word.syllables.length > 1) {
-          // Fill char-a-char por sílaba: sílabas cantadas = branco, atual = fill progressivo, próximas = cinza
+          // Fill char-a-char por sílaba
           return (
             <Box key={word.startMs} flexDirection="row">
               {word.syllables.map((syl) => {
                 const sylSung    = posMs >= syl.endMs;
                 const sylCurrent = !sylSung && posMs >= syl.startMs;
-                if (sylSung) return <Text key={syl.startMs} bold color="white">{syl.text}</Text>;
+                if (sylSung) return <Text key={syl.startMs} bold color="white">{spread(syl.text)}</Text>;
                 if (sylCurrent) {
                   const p      = Math.min(1, (posMs - syl.startMs) / Math.max(1, syl.endMs - syl.startMs));
                   const filled = Math.floor(p * syl.text.length);
                   return (
                     <Box key={syl.startMs} flexDirection="row">
-                      {syl.text.slice(0, filled) && <Text bold color="white">{syl.text.slice(0, filled)}</Text>}
-                      {syl.text.slice(filled)    && <Text bold color="gray">{syl.text.slice(filled)}</Text>}
+                      {syl.text.slice(0, filled) && <Text bold color="white">{spread(syl.text.slice(0, filled))}</Text>}
+                      {syl.text.slice(filled)    && <Text bold color="gray">{spread(syl.text.slice(filled))}</Text>}
                     </Box>
                   );
                 }
-                return <Text key={syl.startMs} bold color="gray">{syl.text}</Text>;
+                return <Text key={syl.startMs} bold color="gray">{spread(syl.text)}</Text>;
               })}
               <Text bold color="gray"> </Text>
             </Box>
@@ -1176,14 +1189,14 @@ function WordLine({ words, posMs }: { words: LyricWord[]; posMs: number }) {
           const filled = Math.floor(p * word.text.length);
           return (
             <Box key={word.startMs} flexDirection="row">
-              {word.text.slice(0, filled) && <Text bold color="white">{word.text.slice(0, filled)}</Text>}
-              {word.text.slice(filled)    && <Text bold color="gray">{word.text.slice(filled)}</Text>}
+              {word.text.slice(0, filled) && <Text bold color="white">{spread(word.text.slice(0, filled))}</Text>}
+              {word.text.slice(filled)    && <Text bold color="gray">{spread(word.text.slice(filled))}</Text>}
               <Text bold color="gray"> </Text>
             </Box>
           );
         }
 
-        return <Text key={word.startMs} color="white" dimColor>{word.text} </Text>;
+        return <Text key={word.startMs} color="white" dimColor>{spread(word.text)} </Text>;
       })}
     </Box>
   );
@@ -1335,19 +1348,20 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
           {visibleLines.map(({ line, rel }) => {
             const isCurrent = rel === 0 && activeIdx >= 0;
             const dist = Math.abs(rel);
-            const dimmed  = dist >= 2;
+            const dimThreshold = config.dimAdjacentLines ? 1 : 2;
+            const dimmed  = dist >= dimThreshold;
 
             if (isCurrent && line.words.length > 0) {
               return (
                 <Box key={line.timeMs} marginY={config.bigCurrentLine ? 1 : 0}>
-                  <WordLine words={line.words} posMs={posMs} />
+                  <WordLine words={line.words} posMs={posMs} letterSpacing={config.letterSpacing} />
                 </Box>
               );
             }
             return (
               <Box key={line.timeMs} marginY={isCurrent && config.bigCurrentLine ? 1 : 0}>
                 <Text bold={isCurrent} color="white" dimColor={dimmed}>
-                  {line.text}
+                  {config.letterSpacing && isCurrent ? line.text.split('').join(' ') : line.text}
                 </Text>
               </Box>
             );
@@ -1409,16 +1423,25 @@ function AuthScreen({ onDone }: { onDone: () => void }) {
 
 // ── Tela: Configurações ─────────────────────────────────────────
 
+const LANG_LABELS: Record<string, string> = {
+  auto: 'Automático', en: 'English', pt: 'Português', es: 'Español',
+  ja: '日本語', ko: '한국어', zh: '中文',
+};
+
 function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c: AppConfig) => void }) {
   const [cursor, setCursor] = useState(0);
 
   type Item =
     | { kind: 'number'; label: string; field: keyof LyricsConfig; min: number; max: number }
-    | { kind: 'bool';   label: string; field: keyof LyricsConfig };
+    | { kind: 'bool';   label: string; field: keyof LyricsConfig }
+    | { kind: 'cycle';  label: string; field: keyof LyricsConfig; options: string[] };
 
   const items: Item[] = [
-    { kind: 'number', label: 'Linhas de contexto', field: 'contextLines', min: 1, max: 10 },
-    { kind: 'bool',   label: 'Linha atual em destaque', field: 'bigCurrentLine' },
+    { kind: 'number', label: 'Linhas de contexto',         field: 'contextLines',     min: 1, max: 10 },
+    { kind: 'bool',   label: 'Linha atual em destaque',    field: 'bigCurrentLine' },
+    { kind: 'bool',   label: 'Escurecer linhas adjacentes',field: 'dimAdjacentLines' },
+    { kind: 'bool',   label: 'Espaçamento entre letras',   field: 'letterSpacing' },
+    { kind: 'cycle',  label: 'Idioma das letras',          field: 'lyricsLang', options: LANG_OPTIONS },
   ];
 
   const patchLyrics = (patch: Partial<LyricsConfig>) => {
@@ -1432,16 +1455,23 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
     if (key.downArrow) setCursor(c => Math.min(items.length - 1, c + 1));
 
     const item = items[cursor];
-    if (key.leftArrow || input === '-') {
-      if (item.kind === 'number') patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - 1) });
-      if (item.kind === 'bool')   patchLyrics({ [item.field]: false });
+    const goLeft = key.leftArrow || input === '-';
+    const goRight = key.rightArrow || input === '+' || input === '=';
+
+    if (item.kind === 'number') {
+      if (goLeft)  patchLyrics({ [item.field]: Math.max(item.min, (config.lyrics[item.field] as number) - 1) });
+      if (goRight) patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + 1) });
     }
-    if (key.rightArrow || input === '+' || input === '=') {
-      if (item.kind === 'number') patchLyrics({ [item.field]: Math.min(item.max, (config.lyrics[item.field] as number) + 1) });
-      if (item.kind === 'bool')   patchLyrics({ [item.field]: true });
+    if (item.kind === 'bool') {
+      if (goLeft)  patchLyrics({ [item.field]: false });
+      if (goRight) patchLyrics({ [item.field]: true });
+      if (key.return) patchLyrics({ [item.field]: !(config.lyrics[item.field]) });
     }
-    if (key.return && item.kind === 'bool') {
-      patchLyrics({ [item.field]: !(config.lyrics[item.field]) });
+    if (item.kind === 'cycle') {
+      const opts = item.options;
+      const cur = opts.indexOf(config.lyrics[item.field] as string);
+      if (goLeft || key.return)  patchLyrics({ [item.field]: opts[(cur - 1 + opts.length) % opts.length] });
+      if (goRight) patchLyrics({ [item.field]: opts[(cur + 1) % opts.length] });
     }
   });
 
@@ -1471,6 +1501,13 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
             )}
             {item.kind === 'bool' && (
               <Text bold color={val ? 'green' : 'gray'}>{val ? 'Sim' : 'Não'}</Text>
+            )}
+            {item.kind === 'cycle' && (
+              <>
+                <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
+                <Text bold color="white">{LANG_LABELS[val as string] ?? String(val)}</Text>
+                <Text color={isSel ? 'red' : 'gray'} dimColor>{' →'}</Text>
+              </>
             )}
           </Box>
         );
@@ -1563,7 +1600,7 @@ function App() {
     lyricsCtrl.current = ctrl;
     setLyricsLines(null);
     setLyricsLoading(true);
-    fetchLyrics(status.title ?? '', status.artist ?? '', status.duration, ctrl.signal)
+    fetchLyrics(status.title ?? '', status.artist ?? '', status.duration, ctrl.signal, appConfig.lyrics.lyricsLang)
       .then(l => {
         if (ctrl.signal.aborted) return;
         setLyricsLines(l);
@@ -1576,7 +1613,7 @@ function App() {
       })
       .catch(() => { if (!ctrl.signal.aborted) setLyricsLoading(false); });
     return () => ctrl.abort();
-  }, [status.videoId]);
+  }, [status.videoId, appConfig.lyrics.lyricsLang]);
 
   // Background fetch de qualidade para músicas na fila (via cache global)
   useEffect(() => {

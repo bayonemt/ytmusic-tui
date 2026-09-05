@@ -299,14 +299,20 @@ function parsePaxsenixV2(data: any): LyricLine[] {
     .filter(l => l.text);
 }
 
+// Mapa de código de idioma → country da iTunes Store
+const LANG_COUNTRY: Record<string, string> = {
+  auto: 'us', en: 'us', pt: 'br', es: 'mx', ja: 'jp', ko: 'kr', zh: 'cn',
+};
+
 async function fetchPaxsenix(
-  title: string, artist: string, durationSec: number, signal?: AbortSignal,
+  title: string, artist: string, durationSec: number, lang?: string, signal?: AbortSignal,
 ): Promise<LyricLine[] | null> {
   try {
+    const country = LANG_COUNTRY[lang ?? 'auto'] ?? 'us';
     // 1. Descobre Apple Music ID via iTunes Search (gratuita, sem auth)
     const q = encodeURIComponent(`${title} ${artist}`);
     const sr = await safeFetch(
-      `https://itunes.apple.com/search?term=${q}&entity=song&limit=8&media=music`,
+      `https://itunes.apple.com/search?term=${q}&entity=song&limit=8&media=music&country=${country}`,
       { signal },
     );
     if (!sr?.ok) return null;
@@ -527,6 +533,7 @@ export async function fetchLyrics(
   artist: string,
   durationSec: number,
   signal?: AbortSignal,
+  lang?: string,
 ): Promise<LyricLine[] | null> {
   // 1. BetterLyrics — syllable-level Apple Music TTML (cache-only, sem auth)
   const betterUrl = `https://lyrics-api.boidu.dev/getLyrics?s=${encodeURIComponent(title)}&a=${encodeURIComponent(artist)}`
@@ -541,7 +548,7 @@ export async function fetchLyrics(
   }
 
   // 2. Paxsenix — word-level Apple Music via iTunes Search + cache Paxsenix
-  const pax = await fetchPaxsenix(title, artist, durationSec, signal);
+  const pax = await fetchPaxsenix(title, artist, durationSec, lang, signal);
   if (pax && pax.length > 0) return pax;
 
   // 3. Beautiful Lyrics Reborn — syllable (QQ Music, Apple, Deezer) + line
