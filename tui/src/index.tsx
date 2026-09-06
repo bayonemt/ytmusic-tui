@@ -1846,6 +1846,9 @@ function App() {
     // Ctrl+Up: abre/fecha tela cheia (funciona em qualquer aba)
     if (key.ctrl && key.upArrow && status.state !== 'idle') { setIsFullscreen(f => !f); return; }
 
+    // Fullscreen ativo: FullscreenScreen cuida de todo o resto
+    if (isFullscreen) return;
+
     // Bloqueado enquanto o usuário está digitando
     if (isTyping) return;
 
