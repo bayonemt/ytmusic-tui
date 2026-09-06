@@ -1404,9 +1404,8 @@ function FullscreenScreen({
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  // Limitar dimensões para não exceder o buffer do chafa (kitty base64 pode ser grande)
-  const artW = Math.min(Math.floor(cols * 0.42), 56);
-  const artH = Math.min(Math.max(4, rows - 4), 38);
+  const artW = Math.floor(cols * 0.42);
+  const artH = Math.max(4, rows - 4); // preenche todo o painel até a barra inferior
 
   let activeIdx = -1;
   if (lines) {
@@ -1797,8 +1796,8 @@ function App() {
     if (status.state !== 'idle' && status.videoId) {
       const c = process.stdout.columns ?? 80;
       const r = process.stdout.rows ?? 24;
-      const fsW = Math.min(Math.floor(c * 0.42), 56);
-      const fsH = Math.min(Math.max(4, r - 4), 38);
+      const fsW = Math.floor(c * 0.42);
+      const fsH = Math.max(4, r - 4);
       prefetchArt(status.videoId, fsW, fsH);
     }
   }, [status.videoId]);
