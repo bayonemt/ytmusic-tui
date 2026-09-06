@@ -95,10 +95,12 @@ type FsLyricsLine = { text: string; words?: LyricWord[]; posMs?: number; isCurre
 type FsLyricsDirectState = { lines: FsLyricsLine[]; startRow: number; col: number; maxChars: number };
 let _fsLyricsDirectState: FsLyricsDirectState | null = null;
 
-function _osc66seg(text: string, scale: number, bold: boolean, dim: boolean): string {
-  if (!text) return '';
+// Escreve um segmento OSC 66 em posição absoluta (row, col) e retorna o novo col.
+// Posicionamento explícito em cada segmento evita depender do avanço de cursor após OSC 66.
+function _osc66at(row: number, col: number, text: string, scale: number, bold: boolean, dim: boolean): [string, number] {
+  if (!text) return ['', col];
   const c = bold ? '\x1b[1;97m' : dim ? '\x1b[2;37m' : '\x1b[0;37m';
-  return `${c}\x1b]66;s=${scale};${text}\x07`;
+  return [`\x1b[${row};${col}H${c}\x1b]66;s=${scale};${text}\x07\x1b[0m`, col + scale * text.length];
 }
 
 function _writeFsLyrics(): void {
@@ -108,7 +110,8 @@ function _writeFsLyrics(): void {
   let out = '\x1b7';
   s.lines.forEach((item, i) => {
     const row = s.startRow + i * SCALE;
-    out += `\x1b[${row};${s.col}H`;
+    let col = s.col;
+    let seg: string;
 
     if (item.isCurrent && item.words && item.words.length > 0 && item.posMs !== undefined) {
       const pMs = item.posMs;
@@ -117,33 +120,41 @@ function _writeFsLyrics(): void {
       for (const word of item.words) {
         const sung    = allSung || pMs >= word.endMs;
         const current = !sung && pMs >= word.startMs;
-        if (sung) { out += _osc66seg(word.text + ' ', SCALE, true, false); continue; }
+        if (sung) {
+          [seg, col] = _osc66at(row, col, word.text + ' ', SCALE, true, false);
+          out += seg; continue;
+        }
         if (current) {
           if (word.syllables && word.syllables.length > 1) {
             for (const syl of word.syllables) {
               const ss = pMs >= syl.endMs;
               const sc = !ss && pMs >= syl.startMs;
-              if (ss) { out += _osc66seg(syl.text, SCALE, true, false); }
-              else if (sc) {
+              if (ss) {
+                [seg, col] = _osc66at(row, col, syl.text, SCALE, true, false); out += seg;
+              } else if (sc) {
                 const p = Math.min(1, (pMs - syl.startMs) / Math.max(1, syl.endMs - syl.startMs));
                 const f = Math.floor(p * syl.text.length);
-                out += _osc66seg(syl.text.slice(0, f), SCALE, true, false);
-                out += _osc66seg(syl.text.slice(f), SCALE, false, true);
-              } else { out += _osc66seg(syl.text, SCALE, false, true); }
+                [seg, col] = _osc66at(row, col, syl.text.slice(0, f), SCALE, true, false); out += seg;
+                [seg, col] = _osc66at(row, col, syl.text.slice(f), SCALE, false, true); out += seg;
+              } else {
+                [seg, col] = _osc66at(row, col, syl.text, SCALE, false, true); out += seg;
+              }
             }
-            out += _osc66seg(' ', SCALE, false, true);
+            [seg, col] = _osc66at(row, col, ' ', SCALE, false, true); out += seg;
           } else {
             const p = Math.min(1, (pMs - word.startMs) / Math.max(1, word.endMs - word.startMs));
             const f = Math.floor(p * word.text.length);
-            out += _osc66seg(word.text.slice(0, f), SCALE, true, false);
-            out += _osc66seg(word.text.slice(f) + ' ', SCALE, false, true);
+            [seg, col] = _osc66at(row, col, word.text.slice(0, f), SCALE, true, false); out += seg;
+            [seg, col] = _osc66at(row, col, word.text.slice(f) + ' ', SCALE, false, true); out += seg;
           }
-        } else { out += _osc66seg(word.text + ' ', SCALE, false, true); }
+        } else {
+          [seg, col] = _osc66at(row, col, word.text + ' ', SCALE, false, true); out += seg;
+        }
       }
     } else {
-      out += _osc66seg(item.text.slice(0, s.maxChars), SCALE, item.isCurrent, item.dim);
+      [seg] = _osc66at(row, col, item.text.slice(0, s.maxChars), SCALE, item.isCurrent, item.dim);
+      out += seg;
     }
-    out += '\x1b[0m';
   });
   out += '\x1b8';
   ((process.stdout as any).__origWrite ?? process.stdout.write.bind(process.stdout))(out);
