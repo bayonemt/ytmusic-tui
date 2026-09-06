@@ -1051,6 +1051,7 @@ function ArtistScreen({
     if (!page?.topSongs.length) return;
     prefetchLyricsQuality(page.topSongs.map(s => ({
       videoId: s.videoId, title: s.title, artist: s.artist,
+      durationSec: s.durationMs ? s.durationMs / 1000 : undefined,
     })));
   }, [page]);
 

@@ -281,7 +281,10 @@ export async function getArtistPage(browseId: string): Promise<ArtistPage | null
         ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? name;
       const thumb: string = r.thumbnail
         ?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at?.(-1)?.url ?? '';
-      if (videoId && title) topSongs.push({ videoId, title, artist: artistStr, thumbnail: thumb });
+      const durText: string = r.fixedColumns?.[0]
+        ?.musicResponsiveListItemFixedColumnRenderer?.text?.runs?.[0]?.text ?? '';
+      const durationMs = parseDurationText(durText) || undefined;
+      if (videoId && title) topSongs.push({ videoId, title, artist: artistStr, thumbnail: thumb, durationMs });
     }
 
     // Albums and singles from carousels
