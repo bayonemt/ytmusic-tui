@@ -90,21 +90,48 @@ type KittyRestoreState = {
 let _kittyState: KittyRestoreState | null = null;
 let _inKittyRestore = false;
 
+// OSC 66 direct lyrics state (fullscreen big text)
+type FsLyricsLine = { text: string; isCurrent: boolean; dim: boolean };
+type FsLyricsDirectState = { lines: FsLyricsLine[]; startRow: number; col: number; maxChars: number };
+let _fsLyricsDirectState: FsLyricsDirectState | null = null;
+
+function _writeFsLyrics(): void {
+  const s = _fsLyricsDirectState;
+  if (!s) return;
+  const SCALE = 2;
+  let out = '\x1b7';
+  s.lines.forEach((item, i) => {
+    const row = s.startRow + i * SCALE;
+    const color = item.isCurrent ? '\x1b[1;97m' : item.dim ? '\x1b[2;37m' : '\x1b[0;37m';
+    const text = item.text.slice(0, s.maxChars);
+    out += `\x1b[${row};${s.col}H${color}\x1b]66;s=${SCALE};${text}\x07\x1b[0m`;
+  });
+  out += '\x1b8';
+  ((process.stdout as any).__origWrite ?? process.stdout.write.bind(process.stdout))(out);
+}
+
 if (!(process.stdout as any).__origWrite) {
   (process.stdout as any).__origWrite = process.stdout.write.bind(process.stdout);
   (process.stdout as any).write = function (chunk: any, ...args: any[]): boolean {
     const result = (process.stdout as any).__origWrite(chunk, ...args);
-    if (!_inKittyRestore && _kittyState && typeof chunk === 'string' && /\x1b\[\d*J/.test(chunk)) {
-      const s = _kittyState;
-      const row = s.directRowFromBottom != null
-        ? process.stdout.rows - s.directRowFromBottom
-        : s.directRow;
-      const col = s.directColFromRight != null
-        ? process.stdout.columns - s.directColFromRight
-        : s.directCol;
-      if (row != null && col != null) {
+    if (!_inKittyRestore && typeof chunk === 'string' && /\x1b\[\d*J/.test(chunk)) {
+      if (_kittyState) {
+        const s = _kittyState;
+        const row = s.directRowFromBottom != null
+          ? process.stdout.rows - s.directRowFromBottom
+          : s.directRow;
+        const col = s.directColFromRight != null
+          ? process.stdout.columns - s.directColFromRight
+          : s.directCol;
+        if (row != null && col != null) {
+          _inKittyRestore = true;
+          (process.stdout as any).__origWrite(`\x1b7\x1b[${row};${col}H${s.imageData}\x1b8`);
+          _inKittyRestore = false;
+        }
+      }
+      if (_fsLyricsDirectState) {
         _inKittyRestore = true;
-        (process.stdout as any).__origWrite(`\x1b7\x1b[${row};${col}H${s.imageData}\x1b8`);
+        _writeFsLyrics();
         _inKittyRestore = false;
       }
     }
@@ -1432,6 +1459,30 @@ function FullscreenScreen({
   const icon = status.state === 'playing' ? '▶' : status.state === 'paused' ? '⏸' : '♫';
   const barW = Math.max(10, cols - artW - 32);
 
+  // Write OSC 66 big-text lyrics directly to stdout on every render
+  const lyricsCol = artW + 4;
+  const maxChars = Math.max(10, Math.floor((cols - artW - 6) / 2));
+  const SCALE = 2;
+  const nLines = visibleLines.length;
+  const totalH = nLines * SCALE;
+  const lyricsStartRow = Math.max(1, Math.floor((artPanelH - totalH) / 2) + 1);
+
+  useEffect(() => {
+    if (!isActive || lines === null) { _fsLyricsDirectState = null; return; }
+    _fsLyricsDirectState = {
+      lines: visibleLines.map(({ line, rel }) => ({
+        text: line.text,
+        isCurrent: rel === 0 && activeIdx >= 0,
+        dim: Math.abs(rel) >= (config.dimAdjacentLines ? 1 : 2),
+      })),
+      startRow: lyricsStartRow,
+      col: lyricsCol,
+      maxChars,
+    };
+    _writeFsLyrics();
+    return () => { _fsLyricsDirectState = null; };
+  });
+
   return (
     <Box flexDirection="column" height={rows}>
       {/* Área principal: arte + letras */}
@@ -1450,34 +1501,8 @@ function FullscreenScreen({
           )}
         </Box>
 
-        {/* Painel direito: letras */}
-        <Box flexGrow={1} flexDirection="column" alignItems="flex-start" justifyContent="center" paddingX={3}>
-          {loading && <Text color="gray" dimColor>carregando letras...</Text>}
-          {!loading && lines === null && <Text color="gray" dimColor>letras não disponíveis</Text>}
-          {!loading && lines !== null && (
-            <Box flexDirection="column">
-              {visibleLines.map(({ line, rel }) => {
-                const isCurrent = rel === 0 && activeIdx >= 0;
-                const dist = Math.abs(rel);
-                const dimmed = dist >= (config.dimAdjacentLines ? 1 : 2);
-                if (isCurrent && line.words.length > 0) {
-                  return (
-                    <Box key={line.timeMs} marginY={config.bigCurrentLine ? 1 : 0}>
-                      <WordLine words={line.words} posMs={posMs} letterSpacing={config.letterSpacing} />
-                    </Box>
-                  );
-                }
-                return (
-                  <Box key={line.timeMs} marginY={isCurrent && config.bigCurrentLine ? 1 : 0}>
-                    <Text bold={isCurrent} color="white" dimColor={dimmed}>
-                      {config.letterSpacing && isCurrent ? line.text.split('').join(' ') : line.text}
-                    </Text>
-                  </Box>
-                );
-              })}
-            </Box>
-          )}
-        </Box>
+        {/* Painel direito: letras em OSC 66 (tamanho 2x) escritas diretamente no stdout */}
+        <Box flexGrow={1} />
       </Box>
 
       {/* Barra inferior: progresso + controles */}
