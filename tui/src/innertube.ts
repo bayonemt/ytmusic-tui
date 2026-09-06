@@ -27,11 +27,11 @@ export interface AuthTokens {
 function buildWebContext(hl = 'pt-BR', gl = 'BR') {
   return {
     client: {
-      clientName: 'WEB_REMIX',
-      clientVersion: '1.20240101.01.00',
+      clientName:       'WEB_REMIX',
+      clientVersion:    '1.20260901.12.00',
       hl,
       gl,
-      platform: 'DESKTOP',
+      platform:         'DESKTOP',
       utcOffsetMinutes: -180,
     },
   };
@@ -174,6 +174,7 @@ export async function pollDeviceFlow(device_code: string, interval: number): Pro
 export function isAuthenticated(): boolean {
   return loadTokens() !== null;
 }
+
 
 async function webRequest(endpoint: string, body: Record<string, unknown>, token?: string | null) {
   const headers: Record<string, string> = {
@@ -919,30 +920,6 @@ export async function getPlaylistTracks(browseId: string, params?: string): Prom
 
 // ── Ações do usuário ──────────────────────────────────────────────
 
-async function likeRequest(endpoint: 'like/like' | 'like/removelike', videoId: string): Promise<void> {
-  const token = await getValidToken();
-  const headers: Record<string, string> = {
-    'X-Youtube-Client-Name':       '67',
-    'X-Youtube-Client-Version':    '1.20260901.12.00',
-    'X-Youtube-Bootstrap-Logged-In': 'true',
-    'X-Goog-AuthUser':             '0',
-    'X-Origin':                    'https://music.youtube.com',
-    'Origin':                      'https://music.youtube.com',
-    'Referer':                     'https://music.youtube.com/',
-    'User-Agent':                  'Mozilla/5.0 (X11; Linux x86_64; rv:154.0) Gecko/20100101 Firefox/154.0',
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const url = `${INNERTUBE_WEB_BASE}/${endpoint}?prettyPrint=false`;
-  await httpPost(url, { context: buildWebContext(), target: { videoId } }, headers);
-}
-
-export async function likeVideo(videoId: string): Promise<void> {
-  await likeRequest('like/like', videoId);
-}
-
-export async function unlikeVideo(videoId: string): Promise<void> {
-  await likeRequest('like/removelike', videoId);
-}
 
 export async function addVideoToPlaylist(videoId: string, playlistBrowseId: string): Promise<void> {
   const token = await getValidToken();

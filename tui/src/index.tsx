@@ -7,7 +7,7 @@ import os from 'os';
 import path from 'path';
 import {
   search, getStreamUrl, clearStreamCache, getNextQueue, getFeed, getPlaylistTracks,
-  getUserPlaylists, likeVideo, addVideoToPlaylist, startDeviceFlow, pollDeviceFlow, isAuthenticated,
+  getUserPlaylists, addVideoToPlaylist, startDeviceFlow, pollDeviceFlow, isAuthenticated,
   getArtistPage,
   type SearchResult, type SongSearchResult, type ArtistSearchResult, type ArtistPage,
   type HomePlaylist, type PlaylistTrack, type FeedItem, type FeedSection,
@@ -408,9 +408,8 @@ const FEED_VISIBLE_ITEMS = 5;
 
 type MenuPhase = 'main' | 'playlists';
 const MENU_OPTIONS = [
-  { id: 'like',     label: '[*] Curtir' },
-  { id: 'download', label: '[v] Baixar  (~Downloads)' },
-  { id: 'playlist', label: '[+] Adicionar a playlist' },
+  { id: 'download',   label: '[v] Baixar  (~Downloads)' },
+  { id: 'playlist',   label: '[+] Adicionar a playlist' },
   { id: 'nointerest', label: '[x] Nao tenho interesse' },
 ];
 
@@ -447,15 +446,7 @@ function ContextMenu({
       if (key.downArrow) { setCursor(c => Math.min(MENU_OPTIONS.length - 1, c + 1)); return; }
       if (key.return) {
         const opt = MENU_OPTIONS[cursor];
-        if (opt.id === 'like') {
-          if (!item.videoId) { setStatus('sem videoId para curtir'); return; }
-          setBusy(true);
-          setStatus('curtindo...');
-          likeVideo(item.videoId)
-            .then(() => setStatus('curtido!'))
-            .catch(e => setStatus('erro: ' + String(e).slice(0, 60)))
-            .finally(() => setBusy(false));
-        } else if (opt.id === 'download') {
+        if (opt.id === 'download') {
           if (!item.videoId) { setStatus('download so funciona para musicas'); return; }
           const outDir = path.join(os.homedir(), 'Downloads');
           const workerPath = new URL('./download-worker.ts', import.meta.url).pathname;
