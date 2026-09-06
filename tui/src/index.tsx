@@ -1521,7 +1521,7 @@ function FullscreenScreen({
   const totalH = nLines * SCALE;
   const lyricsStartRow = Math.max(1, Math.floor((artPanelH - totalH) / 2) + 1);
 
-  if (isActive && lines !== null) {
+  if (isActive && lines !== null && visibleLines.length > 0) {
     _fsLyricsDirectState = {
       lines: visibleLines.map(({ line, rel }) => {
         const isCurrent = rel === 0 && activeIdx >= 0;
@@ -1534,6 +1534,16 @@ function FullscreenScreen({
         };
       }),
       startRow: lyricsStartRow,
+      col: lyricsCol,
+      maxChars,
+    };
+  } else if (isActive) {
+    // Sem letras ainda (carregando ou não encontradas): mostra texto de status centralizado
+    const statusText = loading ? 'carregando letras...' : '(sem letras)';
+    const statusRow = Math.max(1, Math.floor(artPanelH / 2) + 1);
+    _fsLyricsDirectState = {
+      lines: [{ text: statusText, isCurrent: false, dim: true }],
+      startRow: statusRow,
       col: lyricsCol,
       maxChars,
     };
