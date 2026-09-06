@@ -91,9 +91,15 @@ let _kittyState: KittyRestoreState | null = null;
 let _inKittyRestore = false;
 
 // OSC 66 direct lyrics state (fullscreen big text)
-type FsLyricsLine = { text: string; isCurrent: boolean; dim: boolean };
+type FsLyricsLine = { text: string; words?: LyricWord[]; posMs?: number; isCurrent: boolean; dim: boolean };
 type FsLyricsDirectState = { lines: FsLyricsLine[]; startRow: number; col: number; maxChars: number };
 let _fsLyricsDirectState: FsLyricsDirectState | null = null;
+
+function _osc66seg(text: string, scale: number, bold: boolean, dim: boolean): string {
+  if (!text) return '';
+  const c = bold ? '\x1b[1;97m' : dim ? '\x1b[2;37m' : '\x1b[0;37m';
+  return `${c}\x1b]66;s=${scale};${text}\x07`;
+}
 
 function _writeFsLyrics(): void {
   const s = _fsLyricsDirectState;
@@ -102,9 +108,42 @@ function _writeFsLyrics(): void {
   let out = '\x1b7';
   s.lines.forEach((item, i) => {
     const row = s.startRow + i * SCALE;
-    const color = item.isCurrent ? '\x1b[1;97m' : item.dim ? '\x1b[2;37m' : '\x1b[0;37m';
-    const text = item.text.slice(0, s.maxChars);
-    out += `\x1b[${row};${s.col}H${color}\x1b]66;s=${SCALE};${text}\x07\x1b[0m`;
+    out += `\x1b[${row};${s.col}H`;
+
+    if (item.isCurrent && item.words && item.words.length > 0 && item.posMs !== undefined) {
+      const pMs = item.posMs;
+      const lastWord = item.words[item.words.length - 1];
+      const allSung = lastWord != null && pMs >= lastWord.endMs;
+      for (const word of item.words) {
+        const sung    = allSung || pMs >= word.endMs;
+        const current = !sung && pMs >= word.startMs;
+        if (sung) { out += _osc66seg(word.text + ' ', SCALE, true, false); continue; }
+        if (current) {
+          if (word.syllables && word.syllables.length > 1) {
+            for (const syl of word.syllables) {
+              const ss = pMs >= syl.endMs;
+              const sc = !ss && pMs >= syl.startMs;
+              if (ss) { out += _osc66seg(syl.text, SCALE, true, false); }
+              else if (sc) {
+                const p = Math.min(1, (pMs - syl.startMs) / Math.max(1, syl.endMs - syl.startMs));
+                const f = Math.floor(p * syl.text.length);
+                out += _osc66seg(syl.text.slice(0, f), SCALE, true, false);
+                out += _osc66seg(syl.text.slice(f), SCALE, false, true);
+              } else { out += _osc66seg(syl.text, SCALE, false, true); }
+            }
+            out += _osc66seg(' ', SCALE, false, true);
+          } else {
+            const p = Math.min(1, (pMs - word.startMs) / Math.max(1, word.endMs - word.startMs));
+            const f = Math.floor(p * word.text.length);
+            out += _osc66seg(word.text.slice(0, f), SCALE, true, false);
+            out += _osc66seg(word.text.slice(f) + ' ', SCALE, false, true);
+          }
+        } else { out += _osc66seg(word.text + ' ', SCALE, false, true); }
+      }
+    } else {
+      out += _osc66seg(item.text.slice(0, s.maxChars), SCALE, item.isCurrent, item.dim);
+    }
+    out += '\x1b[0m';
   });
   out += '\x1b8';
   ((process.stdout as any).__origWrite ?? process.stdout.write.bind(process.stdout))(out);
@@ -1459,7 +1498,8 @@ function FullscreenScreen({
   const icon = status.state === 'playing' ? '▶' : status.state === 'paused' ? '⏸' : '♫';
   const barW = Math.max(10, cols - artW - 32);
 
-  // Write OSC 66 big-text lyrics directly to stdout on every render
+  // Atualiza estado das letras OSC 66 DURANTE o render (síncrono),
+  // para que o interceptor de stdout já use o estado correto do frame atual.
   const lyricsCol = artW + 4;
   const maxChars = Math.max(10, Math.floor((cols - artW - 6) / 2));
   const SCALE = 2;
@@ -1467,18 +1507,28 @@ function FullscreenScreen({
   const totalH = nLines * SCALE;
   const lyricsStartRow = Math.max(1, Math.floor((artPanelH - totalH) / 2) + 1);
 
-  useEffect(() => {
-    if (!isActive || lines === null) { _fsLyricsDirectState = null; return; }
+  if (isActive && lines !== null) {
     _fsLyricsDirectState = {
-      lines: visibleLines.map(({ line, rel }) => ({
-        text: line.text,
-        isCurrent: rel === 0 && activeIdx >= 0,
-        dim: Math.abs(rel) >= (config.dimAdjacentLines ? 1 : 2),
-      })),
+      lines: visibleLines.map(({ line, rel }) => {
+        const isCurrent = rel === 0 && activeIdx >= 0;
+        return {
+          text: line.text,
+          words: isCurrent ? line.words : undefined,
+          posMs: isCurrent ? posMs : undefined,
+          isCurrent,
+          dim: Math.abs(rel) >= (config.dimAdjacentLines ? 1 : 2),
+        };
+      }),
       startRow: lyricsStartRow,
       col: lyricsCol,
       maxChars,
     };
+  } else {
+    _fsLyricsDirectState = null;
+  }
+
+  // useEffect escreve no stdout APÓS o Ink commitar (garante o frame inicial e reescritas)
+  useEffect(() => {
     _writeFsLyrics();
     return () => { _fsLyricsDirectState = null; };
   });
