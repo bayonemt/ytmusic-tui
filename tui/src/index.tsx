@@ -1454,7 +1454,7 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
 // ── Tela: Tela Cheia ────────────────────────────────────────────
 
 function FullscreenScreen({
-  status, lines, loading, config, hifiQuality, onClose, onNext, onPrev,
+  status, lines, loading, config, hifiQuality, onClose, onNext, onPrev, onOffsetChange,
 }: {
   status: PlayerStatus;
   lines: LyricLine[] | null;
@@ -1464,6 +1464,7 @@ function FullscreenScreen({
   onClose: () => void;
   onNext: () => void;
   onPrev: () => void;
+  onOffsetChange: (delta: number) => void;
 }) {
   const posMs = useLyricsScheduler(lines, config.syncOffsetMs);
 
@@ -1477,6 +1478,8 @@ function FullscreenScreen({
     if (key.ctrl && key.rightArrow) { onNext(); return; }
     if (input === '+' || input === '=') player.volumeUp();
     if (input === '-') player.volumeDown();
+    if (input === '[') { onOffsetChange(-50); return; }
+    if (input === ']') { onOffsetChange(+50); return; }
   });
 
   const cols = process.stdout.columns ?? 80;
@@ -1580,7 +1583,7 @@ function FullscreenScreen({
           <Text color="white">{fmtTime(status.position)} </Text>
           <Text color="red">{progressBar(status.position, status.duration, barW)}</Text>
           <Text color="white"> {fmtTime(status.duration)}</Text>
-          <Text color="gray" dimColor>  Esc/Ctrl+↑=sair  Espaço=pause  n=próx  ←→=seek</Text>
+          <Text color="gray" dimColor>  Esc/Ctrl+↑=sair  Espaço=pause  n=próx  ←→=seek  [/]=sinc({config.syncOffsetMs}ms)</Text>
         </Box>
       </Box>
     </Box>
@@ -2148,6 +2151,11 @@ function App() {
           onClose={() => setIsFullscreen(false)}
           onNext={playNext}
           onPrev={playPrev}
+          onOffsetChange={(delta) => setAppConfig(prev => {
+            const next = { ...prev, lyrics: { ...prev.lyrics, syncOffsetMs: Math.max(-5000, Math.min(5000, prev.lyrics.syncOffsetMs + delta)) } };
+            saveConfig(next);
+            return next;
+          })}
         />
       </Box>
     );
