@@ -1527,11 +1527,13 @@ function FullscreenScreen({
     _fsLyricsDirectState = null;
   }
 
-  // useEffect escreve no stdout APÓS o Ink commitar (garante o frame inicial e reescritas)
-  useEffect(() => {
-    _writeFsLyrics();
-    return () => { _fsLyricsDirectState = null; };
-  });
+  // useEffect escreve no stdout APÓS o Ink commitar (garante o frame inicial e reescritas).
+  // Sem cleanup aqui: o cleanup do useEffect sem deps roda ENTRE renders (antes do próximo
+  // effect), então setar null aqui faria o interceptor ler null no próximo frame = flash.
+  useEffect(() => { _writeFsLyrics(); });
+
+  // Limpa apenas no unmount (ao sair do fullscreen), não a cada re-render.
+  useEffect(() => { return () => { _fsLyricsDirectState = null; }; }, []);
 
   return (
     <Box flexDirection="column" height={rows}>
