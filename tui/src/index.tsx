@@ -1404,8 +1404,13 @@ function FullscreenScreen({
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  const artW = Math.floor(cols * 0.42);
-  const artH = Math.max(4, rows - 4); // preenche todo o painel até a barra inferior
+  const artW      = Math.floor(cols * 0.42);       // largura do painel esquerdo
+  const artPanelH = Math.max(4, rows - 4);         // altura total do painel
+  // Imagem ~70% da altura, aprox. quadrada (ratio 2 cols : 1 row em fontes típicas)
+  const artImgH = Math.floor(artPanelH * 0.70);
+  const artImgW = Math.min(artW - 2, Math.floor(artImgH * 2));
+  const artRow  = Math.floor((artPanelH - artImgH) / 2) + 1; // centrada verticalmente
+  const artCol  = Math.floor((artW - artImgW) / 2) + 1;      // centrada horizontalmente
 
   let activeIdx = -1;
   if (lines) {
@@ -1431,15 +1436,15 @@ function FullscreenScreen({
     <Box flexDirection="column" height={rows}>
       {/* Área principal: arte + letras */}
       <Box flexGrow={1} flexDirection="row">
-        {/* Painel esquerdo: capa grande */}
-        <Box width={artW} flexShrink={0}>
+        {/* Painel esquerdo: espaço reservado + capa centralizada */}
+        <Box width={artW} height={artPanelH} flexShrink={0}>
           {isActive && (
             <AlbumArt
               videoId={status.videoId}
-              width={artW}
-              height={artH}
-              directRow={1}
-              directCol={1}
+              width={artImgW}
+              height={artImgH}
+              directRow={artRow}
+              directCol={artCol}
               kittyId={2}
             />
           )}
@@ -1796,8 +1801,9 @@ function App() {
     if (status.state !== 'idle' && status.videoId) {
       const c = process.stdout.columns ?? 80;
       const r = process.stdout.rows ?? 24;
-      const fsW = Math.floor(c * 0.42);
-      const fsH = Math.max(4, r - 4);
+      const panelH = Math.max(4, r - 4);
+      const fsH = Math.floor(panelH * 0.70);
+      const fsW = Math.min(Math.floor(c * 0.42) - 2, Math.floor(fsH * 2));
       prefetchArt(status.videoId, fsW, fsH);
     }
   }, [status.videoId]);
