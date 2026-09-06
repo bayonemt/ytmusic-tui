@@ -1446,11 +1446,11 @@ function FullscreenScreen({
         </Box>
 
         {/* Painel direito: letras */}
-        <Box flexGrow={1} flexDirection="column" alignItems="center" justifyContent="center" paddingX={2}>
+        <Box flexGrow={1} flexDirection="column" alignItems="flex-start" justifyContent="center" paddingX={3}>
           {loading && <Text color="gray" dimColor>carregando letras...</Text>}
           {!loading && lines === null && <Text color="gray" dimColor>letras não disponíveis</Text>}
           {!loading && lines !== null && (
-            <Box flexDirection="column" alignItems="center">
+            <Box flexDirection="column">
               {visibleLines.map(({ line, rel }) => {
                 const isCurrent = rel === 0 && activeIdx >= 0;
                 const dist = Math.abs(rel);
