@@ -1404,8 +1404,9 @@ function FullscreenScreen({
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  const artW = Math.floor(cols * 0.42);
-  const artH = Math.max(4, rows - 4);
+  // Limitar dimensões para não exceder o buffer do chafa (kitty base64 pode ser grande)
+  const artW = Math.min(Math.floor(cols * 0.42), 56);
+  const artH = Math.min(Math.max(4, rows - 4), 38);
 
   let activeIdx = -1;
   if (lines) {
@@ -1790,6 +1791,17 @@ function App() {
       .catch(() => { if (!ctrl.signal.aborted) setLyricsLoading(false); });
     return () => ctrl.abort();
   }, [status.videoId, appConfig.language.lyricsLang]);
+
+  // Prefetch da arte nas dimensões do fullscreen assim que a música muda
+  useEffect(() => {
+    if (status.state !== 'idle' && status.videoId) {
+      const c = process.stdout.columns ?? 80;
+      const r = process.stdout.rows ?? 24;
+      const fsW = Math.min(Math.floor(c * 0.42), 56);
+      const fsH = Math.min(Math.max(4, r - 4), 38);
+      prefetchArt(status.videoId, fsW, fsH);
+    }
+  }, [status.videoId]);
 
   // Background fetch de qualidade para músicas na fila (via cache global)
   useEffect(() => {

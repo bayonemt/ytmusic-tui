@@ -111,7 +111,7 @@ async function runChafa(imgPath: string, w: number, h: number, fmt: string): Pro
   }
 
   args.push(imgPath);
-  const { stdout } = await execFileAsync('chafa', args, { timeout: 8000 });
+  const { stdout } = await execFileAsync('chafa', args, { timeout: 8000, maxBuffer: 16 * 1024 * 1024 });
   return stdout.replace(/\x1b\[\?25[lh]/g, '');
 }
 
