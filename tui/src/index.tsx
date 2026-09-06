@@ -391,7 +391,7 @@ function PlayerBar({ status, hifiQuality }: { status: PlayerStatus; hifiQuality?
       {/* Direita: volume */}
       <Box width={20} flexDirection="column" alignItems="flex-end" justifyContent="center">
         <Text color="white">Espaço=pause  n=próx</Text>
-        <Text color="white">Ctrl+←→=pular faixa</Text>
+        <Text color="white">Ctrl+↑=tela  ←→=seek</Text>
         <Box>
           <Text color="white">🔊 </Text>
           <Text color="red">{volBar(status.volume)}</Text>
@@ -1205,15 +1205,15 @@ function WordLine({ words, posMs, letterSpacing }: { words: LyricWord[]; posMs: 
   );
 }
 
-function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus; lines: LyricLine[] | null; loading: boolean; config: LyricsConfig }) {
-  // posMs NÃO é state — é lido direto de player.positionMs no momento do render.
-  // Re-renders são agendados via setTimeout exatamente quando a linha/palavra vai mudar,
-  // eliminando qualquer intervalo periódico que causaria re-renders extras e piscadas na capa.
+// ── Hook: Scheduler de letras ───────────────────────────────────
+// Agenda re-renders exatamente nas fronteiras de linha/palavra/sílaba.
+// Compartilhado por LyricsScreen e FullscreenScreen.
+function useLyricsScheduler(lines: LyricLine[] | null, syncOffsetMs: number): number {
   const [, forceUpdate] = useState(0);
   const linesRef = useRef<LyricLine[] | null>(null);
   linesRef.current = lines;
-  const syncOffsetRef = useRef(config.syncOffsetMs);
-  syncOffsetRef.current = config.syncOffsetMs; // atualizado a cada render
+  const syncOffsetRef = useRef(syncOffsetMs);
+  syncOffsetRef.current = syncOffsetMs;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleRef = useRef<() => void>(() => {});
 
@@ -1234,7 +1234,6 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
       }
 
       let nextBoundary = Infinity;
-
       if (lineIdx < 0) {
         nextBoundary = ls[0].timeMs;
       } else {
@@ -1243,14 +1242,13 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
           if (word.startMs > posMs) { nextBoundary = Math.min(nextBoundary, word.startMs); break; }
           if (word.endMs > posMs) {
             if (word.syllables && word.syllables.length > 1) {
-              // Sílabas: char-level dentro da sílaba atual + fronteira da próxima
               const curSyl = word.syllables.find(s => s.startMs <= posMs && posMs < s.endMs);
               const nextSyl = word.syllables.find(s => s.startMs > posMs);
               if (curSyl) {
                 const nChars = curSyl.text.length;
                 if (nChars > 1) {
-                  const charDur   = (curSyl.endMs - curSyl.startMs) / nChars;
-                  const elapsed   = posMs - curSyl.startMs;
+                  const charDur    = (curSyl.endMs - curSyl.startMs) / nChars;
+                  const elapsed    = posMs - curSyl.startMs;
                   const nextCharMs = curSyl.startMs + (Math.floor(elapsed / charDur) + 1) * charDur;
                   nextBoundary = Math.min(nextBoundary, nextCharMs);
                 } else {
@@ -1259,11 +1257,10 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
               }
               if (nextSyl) nextBoundary = Math.min(nextBoundary, nextSyl.startMs);
             } else {
-              // Sem sílabas: fill char-a-char interpolado
               const nChars = word.text.length;
               if (nChars > 1) {
-                const charDur   = (word.endMs - word.startMs) / nChars;
-                const elapsed   = posMs - word.startMs;
+                const charDur    = (word.endMs - word.startMs) / nChars;
+                const elapsed    = posMs - word.startMs;
                 const nextCharMs = word.startMs + (Math.floor(elapsed / charDur) + 1) * charDur;
                 nextBoundary = Math.min(nextBoundary, nextCharMs);
               } else {
@@ -1277,7 +1274,6 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
         if (nextLine) nextBoundary = Math.min(nextBoundary, nextLine.timeMs);
       }
 
-      // Cap de 2s: se posMs estiver errado, o scheduler se auto-corrige em no máximo 2s
       const raw = nextBoundary === Infinity ? 2000 : nextBoundary - posMs;
       const delay = Math.max(16, Math.min(raw, 2000));
       timerRef.current = setTimeout(() => { forceUpdate(n => n + 1); scheduleNext(); }, delay);
@@ -1288,22 +1284,23 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [lines]);
 
-  // Ressincronização via mpv IPC a cada 2s:
-  // calibra startTime do player (corrige positionMs) e reagenda o scheduler
   useEffect(() => {
     const id = setInterval(async () => {
       const exact = await player.queryPosition();
       if (exact !== null) {
-        player.calibrateFrom(exact);       // corrige player.positionMs
-        forceUpdate(n => n + 1);           // re-render com posição correta
-        scheduleRef.current();             // reagenda para próximo boundary correto
+        player.calibrateFrom(exact);
+        forceUpdate(n => n + 1);
+        scheduleRef.current();
       }
     }, 2000);
     return () => clearInterval(id);
   }, []);
 
-  // posMs computado inline com offset de sincronia aplicado
-  const posMs = player.positionMs + config.syncOffsetMs;
+  return player.positionMs + syncOffsetMs;
+}
+
+function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus; lines: LyricLine[] | null; loading: boolean; config: LyricsConfig }) {
+  const posMs = useLyricsScheduler(lines, config.syncOffsetMs);
 
   let activeIdx = -1;
   if (lines) {
@@ -1373,6 +1370,126 @@ function LyricsScreen({ status, lines, loading, config }: { status: PlayerStatus
           })}
         </Box>
       )}
+    </Box>
+  );
+}
+
+// ── Tela: Tela Cheia ────────────────────────────────────────────
+
+function FullscreenScreen({
+  status, lines, loading, config, hifiQuality, onClose, onNext, onPrev,
+}: {
+  status: PlayerStatus;
+  lines: LyricLine[] | null;
+  loading: boolean;
+  config: LyricsConfig;
+  hifiQuality?: string | null;
+  onClose: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+}) {
+  const posMs = useLyricsScheduler(lines, config.syncOffsetMs);
+
+  useInput((input, key) => {
+    if (key.escape || (key.ctrl && key.upArrow)) { onClose(); return; }
+    if (input === ' ') player.togglePause();
+    if (input === 'n') { onNext(); return; }
+    if (key.leftArrow  && !key.ctrl) player.seek(-10);
+    if (key.rightArrow && !key.ctrl) player.seek(10);
+    if (key.ctrl && key.leftArrow)  { onPrev(); return; }
+    if (key.ctrl && key.rightArrow) { onNext(); return; }
+    if (input === '+' || input === '=') player.volumeUp();
+    if (input === '-') player.volumeDown();
+  });
+
+  const cols = process.stdout.columns ?? 80;
+  const rows = process.stdout.rows ?? 24;
+  const artW = Math.floor(cols * 0.42);
+  const artH = Math.max(4, rows - 4);
+
+  let activeIdx = -1;
+  if (lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (posMs >= lines[i].timeMs) { activeIdx = i; break; }
+    }
+  }
+
+  const ABOVE = config.contextLines;
+  const BELOW = config.contextLines;
+  const center = activeIdx >= 0 ? activeIdx : 0;
+  const start = lines ? Math.max(0, center - ABOVE) : 0;
+  const end   = lines ? Math.min(lines.length, center + BELOW + 1) : 0;
+  const visibleLines = lines
+    ? lines.slice(start, end).map((l, i) => ({ line: l, rel: start + i - center }))
+    : [];
+
+  const isActive = status.state !== 'idle';
+  const icon = status.state === 'playing' ? '▶' : status.state === 'paused' ? '⏸' : '♫';
+  const barW = Math.max(10, cols - artW - 32);
+
+  return (
+    <Box flexDirection="column" height={rows}>
+      {/* Área principal: arte + letras */}
+      <Box flexGrow={1} flexDirection="row">
+        {/* Painel esquerdo: capa grande */}
+        <Box width={artW} flexShrink={0}>
+          {isActive && (
+            <AlbumArt
+              videoId={status.videoId}
+              width={artW}
+              height={artH}
+              directRow={1}
+              directCol={1}
+              kittyId={2}
+            />
+          )}
+        </Box>
+
+        {/* Painel direito: letras */}
+        <Box flexGrow={1} flexDirection="column" alignItems="center" justifyContent="center" paddingX={2}>
+          {loading && <Text color="gray" dimColor>carregando letras...</Text>}
+          {!loading && lines === null && <Text color="gray" dimColor>letras não disponíveis</Text>}
+          {!loading && lines !== null && (
+            <Box flexDirection="column" alignItems="center">
+              {visibleLines.map(({ line, rel }) => {
+                const isCurrent = rel === 0 && activeIdx >= 0;
+                const dist = Math.abs(rel);
+                const dimmed = dist >= (config.dimAdjacentLines ? 1 : 2);
+                if (isCurrent && line.words.length > 0) {
+                  return (
+                    <Box key={line.timeMs} marginY={config.bigCurrentLine ? 1 : 0}>
+                      <WordLine words={line.words} posMs={posMs} letterSpacing={config.letterSpacing} />
+                    </Box>
+                  );
+                }
+                return (
+                  <Box key={line.timeMs} marginY={isCurrent && config.bigCurrentLine ? 1 : 0}>
+                    <Text bold={isCurrent} color="white" dimColor={dimmed}>
+                      {config.letterSpacing && isCurrent ? line.text.split('').join(' ') : line.text}
+                    </Text>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      {/* Barra inferior: progresso + controles */}
+      <Box borderStyle="single" borderColor="white" paddingX={1} flexDirection="column">
+        <Box flexDirection="row" gap={1}>
+          <Text color="red" bold>{icon}</Text>
+          <Text bold color="white" wrap="truncate">{status.title ?? ''}</Text>
+          {status.artist && <Text color="white" dimColor>  {status.artist}</Text>}
+          {hifiQuality && <Text color="cyan">  [{hifiQuality}]</Text>}
+        </Box>
+        <Box flexDirection="row">
+          <Text color="white">{fmtTime(status.position)} </Text>
+          <Text color="red">{progressBar(status.position, status.duration, barW)}</Text>
+          <Text color="white"> {fmtTime(status.duration)}</Text>
+          <Text color="gray" dimColor>  Esc/Ctrl+↑=sair  Espaço=pause  n=próx  ←→=seek</Text>
+        </Box>
+      </Box>
     </Box>
   );
 }
@@ -1609,6 +1726,7 @@ function App() {
   const retriedVideoIds = useRef(new Set<string>());
   const hifiAbort = useRef<AbortController | null>(null);
   const [hifiQuality, setHifiQuality] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Downloads em andamento
   const [downloads, setDownloads] = useState<Map<string, DownloadInfo>>(new Map());
@@ -1707,6 +1825,9 @@ function App() {
   useInput((input, key) => {
     // Ctrl+C sempre funciona
     if (key.ctrl && input === 'c') { player.stop(); exit(); return; }
+
+    // Ctrl+Up: abre/fecha tela cheia (funciona em qualquer aba)
+    if (key.ctrl && key.upArrow && status.state !== 'idle') { setIsFullscreen(f => !f); return; }
 
     // Bloqueado enquanto o usuário está digitando
     if (isTyping) return;
@@ -1906,6 +2027,23 @@ function App() {
       setQueue(q => [...q.slice(0, 1), ...next.map(n => ({ videoId: n.videoId, title: n.title, artist: n.artist }))]);
     }).catch(() => {});
   }, [playTrack]);
+
+  if (isFullscreen && status.state !== 'idle') {
+    return (
+      <Box flexDirection="column" flexGrow={1} minHeight={process.stdout.rows ?? 24}>
+        <FullscreenScreen
+          status={status}
+          lines={lyricsLines}
+          loading={lyricsLoading}
+          config={appConfig.lyrics}
+          hifiQuality={hifiQuality}
+          onClose={() => setIsFullscreen(false)}
+          onNext={playNext}
+          onPrev={playPrev}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={process.stdout.rows ?? 24}>
