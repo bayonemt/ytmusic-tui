@@ -35,12 +35,14 @@ interface LanguageConfig {
   uiLang:     string; // idioma da interface: 'pt' | 'en'
   lyricsLang: string; // idioma das letras: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
 }
-interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; }
+interface PlayerConfig { hifiEnabled: boolean; }
+interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; player: PlayerConfig; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
 const DEFAULT_CONFIG: AppConfig = {
   lyrics:   { contextLines: 3, bigCurrentLine: false, dimAdjacentLines: false, letterSpacing: false, syncOffsetMs: 0 },
   language: { uiLang: 'pt', lyricsLang: 'auto' },
+  player:   { hifiEnabled: true },
 };
 
 const UI_LANG_OPTIONS     = SUPPORTED_LANGS as string[];
@@ -61,6 +63,9 @@ function loadConfig(): AppConfig {
       language: {
         uiLang:     UI_LANG_OPTIONS.includes(raw?.language?.uiLang)         ? raw.language.uiLang     : 'pt',
         lyricsLang: LYRICS_LANG_OPTIONS.includes(raw?.language?.lyricsLang) ? raw.language.lyricsLang : 'auto',
+      },
+      player: {
+        hifiEnabled: raw?.player?.hifiEnabled ?? true,
       },
     };
   } catch { return DEFAULT_CONFIG; }
@@ -1683,7 +1688,7 @@ const LYRICS_LANG_LABELS: Record<string, string> = {
   ja: '日本語', ko: '한국어', zh: '中文',
 };
 
-type SettingsTab = 'lyrics' | 'language';
+type SettingsTab = 'lyrics' | 'language' | 'player';
 
 function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c: AppConfig) => void }) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('lyrics');
@@ -1711,7 +1716,12 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
     { kind: 'cycle', labelKey: 'settings.lang.lyrics', field: 'lyricsLang', options: LYRICS_LANG_OPTIONS, labels: LYRICS_LANG_LABELS },
   ];
 
-  const currentItems = settingsTab === 'lyrics' ? lyricsItems : langItems;
+  type PlayerItem = { kind: 'bool'; labelKey: string; field: keyof PlayerConfig };
+  const playerItems: PlayerItem[] = [
+    { kind: 'bool', labelKey: 'settings.player.hifi', field: 'hifiEnabled' },
+  ];
+
+  const currentItems = settingsTab === 'lyrics' ? lyricsItems : settingsTab === 'language' ? langItems : playerItems;
 
   const patchLyrics = (patch: Partial<LyricsConfig>) => {
     const next = { ...config, lyrics: { ...config.lyrics, ...patch } };
@@ -1722,11 +1732,17 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
     if (patch.uiLang) setLang(patch.uiLang);
     onChange(next); saveConfig(next);
   };
+  const patchPlayer = (patch: Partial<PlayerConfig>) => {
+    const next = { ...config, player: { ...config.player, ...patch } };
+    onChange(next); saveConfig(next);
+  };
+
+  const TABS: SettingsTab[] = ['lyrics', 'language', 'player'];
 
   useInput((input, key) => {
     // Tab switching com Tab ou [ ]
     if (input === '[' || (key.tab && !key.shift)) {
-      setSettingsTab(t => t === 'lyrics' ? 'language' : 'lyrics');
+      setSettingsTab(cur => TABS[(TABS.indexOf(cur) + 1) % TABS.length]);
       setCursor(0); return;
     }
 
@@ -1749,13 +1765,19 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
         if (goRight)     patchLyrics({ [item.field]: true });
         if (key.return)  patchLyrics({ [item.field]: !config.lyrics[item.field] });
       }
-    } else {
+    } else if (settingsTab === 'language') {
       const item = langItems[cursor];
       if (!item) return;
       const opts = item.options;
       const cur = opts.indexOf(config.language[item.field] as string);
       if (goLeft || key.return) patchLanguage({ [item.field]: opts[(cur - 1 + opts.length) % opts.length] });
       if (goRight)              patchLanguage({ [item.field]: opts[(cur + 1) % opts.length] });
+    } else {
+      const item = playerItems[cursor];
+      if (!item) return;
+      if (goLeft)      patchPlayer({ [item.field]: false });
+      if (goRight)     patchPlayer({ [item.field]: true });
+      if (key.return)  patchPlayer({ [item.field]: !config.player[item.field] });
     }
   });
 
@@ -1767,7 +1789,7 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
 
       {/* Abas */}
       <Box flexDirection="row" marginBottom={1} gap={2}>
-        {(['lyrics', 'language'] as SettingsTab[]).map(tab => (
+        {TABS.map(tab => (
           <Box key={tab}>
             <Text
               bold={settingsTab === tab}
@@ -1814,6 +1836,19 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
             <Text color={isSel ? 'red' : 'gray'} dimColor>{'← '}</Text>
             <Text bold color="white">{item.labels[val] ?? val}</Text>
             <Text color={isSel ? 'red' : 'gray'} dimColor>{' →'}</Text>
+          </Box>
+        );
+      })}
+
+      {/* Itens da aba Player */}
+      {settingsTab === 'player' && playerItems.map((item, i) => {
+        const isSel = i === cursor;
+        const val = config.player[item.field];
+        return (
+          <Box key={item.field} flexDirection="row" marginLeft={2}>
+            <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
+            <Text color="white">{t(item.labelKey)}{'  '}</Text>
+            <Text bold color={val ? 'green' : 'gray'}>{val ? t('yes') : t('no')}</Text>
           </Box>
         );
       })}
@@ -1953,6 +1988,8 @@ function App() {
   const [likedVideoId, setLikedVideoId] = useState<string | null>(null);
   const [browserAuthPending, setBrowserAuthPending] = useState(false);
   const browserAuthCallback = useRef<(() => void) | null>(null);
+  // URL original do yt-dlp, antes do HiFi substituir (para toggle q)
+  const ytdlpUrl = useRef<string | null>(null);
 
   const requestBrowserAuth = useCallback((cb: () => void) => {
     browserAuthCallback.current = cb;
@@ -2136,6 +2173,27 @@ function App() {
     }
     if (input === ' ') player.togglePause();
     if (input === 'n') playNext();
+    // q = toggle qualidade HiFi on-the-fly para a música atual
+    if (input === 'q' && status.state !== 'idle' && status.videoId) {
+      if (hifiQuality) {
+        // Estava em HiFi → volta para yt-dlp
+        hifiAbort.current?.abort();
+        hifiAbort.current = null;
+        if (ytdlpUrl.current) player.switchUrl(ytdlpUrl.current);
+        setHifiQuality(null);
+      } else {
+        // Estava em qualidade normal → busca HiFi agora
+        const vid = status.videoId;
+        const ctrl = new AbortController();
+        hifiAbort.current = ctrl;
+        findBestStream(status.title ?? '', status.artist ?? '', status.duration * 1000, ctrl.signal, (result: HifiResult) => {
+          if (player.status.videoId === vid && !ctrl.signal.aborted) {
+            player.switchUrl(result.url);
+            setHifiQuality(result.quality);
+          }
+        }).catch(() => {});
+      }
+    }
     // Volume: bloqueado na tela de config (←→ lá controlam seleção)
     if (tab !== 'settings') {
       if (input === '+' || input === '=') player.volumeUp();
@@ -2172,20 +2230,22 @@ function App() {
     try {
       const stream = await getStreamUrl(videoId, title, artist);
       if (stream) {
+        ytdlpUrl.current = stream.url;
         await player.play(stream.url, title, artist, stream.durationMs, videoId);
         setQueueIdx(idx);
         played = true;
 
-        // Busca versão de maior qualidade em background
-        const ctrl = new AbortController();
-        hifiAbort.current = ctrl;
-        findBestStream(title, artist, stream.durationMs, ctrl.signal, (result: HifiResult) => {
-          // Só troca se ainda estamos tocando a mesma música
-          if (player.status.videoId === videoId && !ctrl.signal.aborted) {
-            player.switchUrl(result.url);
-            setHifiQuality(result.quality);
-          }
-        }).catch(() => {});
+        // Busca versão de maior qualidade em background (se HiFi ativado nas configs)
+        if (appConfig.player.hifiEnabled) {
+          const ctrl = new AbortController();
+          hifiAbort.current = ctrl;
+          findBestStream(title, artist, stream.durationMs, ctrl.signal, (result: HifiResult) => {
+            if (player.status.videoId === videoId && !ctrl.signal.aborted) {
+              player.switchUrl(result.url);
+              setHifiQuality(result.quality);
+            }
+          }).catch(() => {});
+        }
       }
     } catch { /* stream fetch failed */ }
     setContentLoading(false);

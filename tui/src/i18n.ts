@@ -108,6 +108,8 @@ const S: Record<string, Tr> = {
   'settings.lyrics.offset': { pt: 'Avanço das letras',          en: 'Lyrics advance',             es: 'Avance de letra',             fr: 'Avance des paroles'          },
   'settings.lang.ui':       { pt: 'Idioma da interface',        en: 'Interface language',         es: 'Idioma de la interfaz',       fr: 'Langue de l\'interface'      },
   'settings.lang.lyrics':   { pt: 'Idioma das letras',          en: 'Lyrics language',            es: 'Idioma de la letra',          fr: 'Langue des paroles'          },
+  'settings.tab.player':   { pt: 'Player',                     en: 'Player',                     es: 'Reproductor',                 fr: 'Lecteur'                     },
+  'settings.player.hifi':  { pt: 'Qualidade HiFi (Tidal/JioSaavn)', en: 'HiFi Quality (Tidal/JioSaavn)', es: 'Calidad HiFi (Tidal/JioSaavn)', fr: 'Qualité HiFi (Tidal/JioSaavn)' },
 
   // ── Lang names (always shown in their own language) ───────────────────────
   'lang.pt': { pt: 'Português', en: 'Português', es: 'Português', fr: 'Português' },
