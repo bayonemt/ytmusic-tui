@@ -17,6 +17,7 @@ const S: Record<string, Tr> = {
   'tab.lyrics':     { pt: 'Letras',    en: 'Lyrics',    es: 'Letra',     fr: 'Paroles'   },
   'tab.playlists':  { pt: 'Playlists', en: 'Playlists', es: 'Playlists', fr: 'Playlists' },
   'tab.settings':   { pt: 'Config',    en: 'Settings',  es: 'Config',    fr: 'Réglages'  },
+  'tab.history':    { pt: 'Histórico',  en: 'History',   es: 'Historial', fr: 'Historique' },
   'tab.login':      { pt: 'Login',     en: 'Login',     es: 'Login',     fr: 'Connexion' },
 
   // ── Player bar ────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ const S: Record<string, Tr> = {
   'player.hint2':   { pt: 'Ctrl+↑=tela  ←→=seek',  en: 'Ctrl+↑=screen  ←→=seek', es: 'Ctrl+↑=pantalla  ←→=seek', fr: 'Ctrl+↑=écran  ←→=seek' },
 
   // ── Home ──────────────────────────────────────────────────────────────────
+  'history.empty':  { pt: 'Nenhuma música no histórico.', en: 'No songs in history.', es: 'Sin canciones en el historial.', fr: 'Aucun morceau dans l\'historique.' },
   'home.title':     { pt: 'Para você',                 en: 'For you',              es: 'Para ti',                fr: 'Pour vous'              },
   'home.empty':     { pt: 'Nenhum conteúdo encontrado.', en: 'No content found.',  es: 'Sin contenido.',         fr: 'Aucun contenu.'         },
   'loading':        { pt: 'Carregando…',               en: 'Loading…',             es: 'Cargando…',              fr: 'Chargement…'            },

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
+import { getAuthHeaders } from './browser-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', '.auth.json');
@@ -923,6 +924,63 @@ export async function getPlaylistTracks(browseId: string, params?: string): Prom
 
 // ── Ações do usuário ──────────────────────────────────────────────
 
+
+// Requisição autenticada via cookies do browser (para like/histórico)
+async function webRequestBrowser(endpoint: string, body: Record<string, unknown>) {
+  const authHeaders = getAuthHeaders();
+  if (!authHeaders) throw new Error('browser-auth-required');
+  const headers: Record<string, string> = {
+    'X-YouTube-Client-Name': '67',
+    'X-YouTube-Client-Version': '1.20250101.01.00',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://music.youtube.com/',
+    'Content-Type': 'application/json',
+    ...authHeaders,
+  };
+  const url = `${INNERTUBE_WEB_BASE}/${endpoint}?prettyPrint=false`;
+  return httpPost(url, { context: buildWebContext(), ...body }, headers);
+}
+
+export async function likeTrack(videoId: string): Promise<void> {
+  await webRequestBrowser('like/like', { target: { videoId } });
+}
+
+export async function unlikeTrack(videoId: string): Promise<void> {
+  await webRequestBrowser('like/removelike', { target: { videoId } });
+}
+
+export interface HistoryTrack {
+  videoId: string;
+  title: string;
+  artist: string;
+  thumbnail?: string;
+}
+
+export async function getHistory(): Promise<HistoryTrack[]> {
+  const res = await webRequestBrowser('browse', { browseId: 'FEmusic_history' });
+  const tracks: HistoryTrack[] = [];
+  try {
+    const sections = res?.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]
+      ?.tabRenderer?.content?.sectionListRenderer?.contents ?? [];
+    for (const section of sections) {
+      const items = section?.musicShelfRenderer?.contents ?? [];
+      for (const item of items) {
+        const r = item?.musicResponsiveListItemRenderer;
+        if (!r) continue;
+        const videoId: string | undefined = r.flexColumns?.[0]
+          ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
+          ?.navigationEndpoint?.watchEndpoint?.videoId;
+        const title: string = r.flexColumns?.[0]
+          ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
+        const artist: string = r.flexColumns?.[1]
+          ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text ?? '';
+        const thumb = r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url;
+        if (videoId && title) tracks.push({ videoId, title, artist, thumbnail: thumb });
+      }
+    }
+  } catch { /* parse error */ }
+  return tracks;
+}
 
 export async function addVideoToPlaylist(videoId: string, playlistBrowseId: string): Promise<void> {
   const token = await getValidToken();

@@ -17,6 +17,7 @@
     "ink": "^6.8.0",
     "ink-select-input": "^6.2.0",
     "ink-text-input": "^6.0.0",
+    "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-reconciler": "^0.33.0",
     "tsx": "^4.23.12",

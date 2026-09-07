@@ -8,10 +8,12 @@ import path from 'path';
 import {
   search, getStreamUrl, clearStreamCache, getNextQueue, getFeed, getPlaylistTracks,
   getUserPlaylists, addVideoToPlaylist, startDeviceFlow, pollDeviceFlow, isAuthenticated,
-  getArtistPage,
+  getArtistPage, likeTrack, unlikeTrack, getHistory,
   type SearchResult, type SongSearchResult, type ArtistSearchResult, type ArtistPage,
   type HomePlaylist, type PlaylistTrack, type FeedItem, type FeedSection,
+  type HistoryTrack,
 } from './innertube.js';
+import { hasBrowserAuth, launchBrowserLogin } from './browser-auth.js';
 import { AudioPlayer, type PlayerStatus } from './player.js';
 import { findBestStream, type HifiResult } from './hifi.js';
 import { fetchLyrics, type LyricLine, type LyricWord } from './lyrics.js';
@@ -19,7 +21,7 @@ import { renderArt, prefetchArt, supportsNativeImages, injectKittyId } from './a
 import { t, setLang, SUPPORTED_LANGS } from './i18n.js';
 import { DiscordRPC, DISCORD_CLIENT_ID } from './discord.js';
 
-type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth';
+type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth' | 'history';
 
 // ── Configuração persistente ────────────────────────────────────────
 interface LyricsConfig {
@@ -409,6 +411,7 @@ function TopBar({ tab }: { tab: NavTab }) {
       <Text color={tab === 'queue'     ? 'red' : 'white'} bold={tab === 'queue'}     dimColor={tab !== 'queue'}>  {t('tab.queue')}[l]  </Text>
       <Text color={tab === 'lyrics'    ? 'red' : 'white'} bold={tab === 'lyrics'}    dimColor={tab !== 'lyrics'}>  {t('tab.lyrics')}[L]  </Text>
       <Text color={tab === 'settings'  ? 'red' : 'white'} bold={tab === 'settings'}  dimColor={tab !== 'settings'}>  {t('tab.settings')}[s]  </Text>
+      <Text color={tab === 'history'   ? 'red' : 'white'} bold={tab === 'history'}   dimColor={tab !== 'history'}>  {t('tab.history')}[H]  </Text>
       <Text color={tab === 'auth'      ? 'red' : 'white'} bold={tab === 'auth'}      dimColor={tab !== 'auth'}>  {t('tab.login')}[a]  </Text>
       <Text color="white" dimColor>   q=sair</Text>
     </Box>
@@ -417,7 +420,7 @@ function TopBar({ tab }: { tab: NavTab }) {
 
 // ── Player Bar (Rodapé) ─────────────────────────────────────────
 
-function PlayerBar({ status, hifiQuality }: { status: PlayerStatus; hifiQuality?: string | null }) {
+function PlayerBar({ status, hifiQuality, liked }: { status: PlayerStatus; hifiQuality?: string | null; liked?: boolean }) {
   const icon = status.state === 'playing' ? '▶' : status.state === 'paused' ? '⏸' : '♫';
   const barW = 24;
   const isActive = status.state !== 'idle';
@@ -447,6 +450,7 @@ function PlayerBar({ status, hifiQuality }: { status: PlayerStatus; hifiQuality?
           <Box flexDirection="row" gap={1}>
             {hifiQuality && <Text color="cyan">{hifiQuality}</Text>}
             <LyricsTag videoId={status.videoId} />
+            <Text color={liked ? 'red' : 'white'} dimColor={!liked}>{liked ? '♥' : '♡'}</Text>
             {!hifiQuality && <Text color="white">←→=seek</Text>}
           </Box>
         )}
@@ -1801,6 +1805,95 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
   );
 }
 
+// ── Modal: Login via Navegador ──────────────────────────────────
+
+function BrowserLoginModal({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [status, setStatus] = useState<'idle' | 'opening' | 'waiting' | 'done' | 'error'>('idle');
+  const [msg, setMsg] = useState('');
+
+  useInput((_, key) => {
+    if (key.return && status === 'idle') {
+      setStatus('opening');
+      setMsg('Abrindo navegador...');
+      launchBrowserLogin(m => { setStatus('waiting'); setMsg(m); })
+        .then(ok => {
+          if (ok) { setStatus('done'); setMsg('Login realizado!'); setTimeout(onDone, 1000); }
+          else    { setStatus('error'); setMsg('Navegador fechado sem login.'); }
+        });
+    }
+    if (key.escape && status !== 'opening' && status !== 'waiting') onCancel();
+  });
+
+  const stateColor = status === 'done' ? 'green' : status === 'error' ? 'red' : 'white';
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} gap={1}>
+      <Text bold color="cyan">Login via Navegador</Text>
+      <Text color="white" dimColor>Um navegador será aberto. Faça login no YouTube Music e feche quando terminar.</Text>
+      {status === 'idle' && (
+        <Text color="white">Pressione <Text color="green" bold>Enter</Text> para abrir o navegador  <Text color="gray" dimColor>Esc = cancelar</Text></Text>
+      )}
+      {status !== 'idle' && <Text color={stateColor}>{msg}</Text>}
+    </Box>
+  );
+}
+
+// ── Tela: Histórico ─────────────────────────────────────────────
+
+function HistoryScreen({ onNeedBrowserAuth, onPlay }: {
+  onNeedBrowserAuth: (cb: () => void) => void;
+  onPlay: (videoId: string, title: string, artist: string) => void;
+}) {
+  const [tracks, setTracks] = useState<HistoryTrack[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    if (!hasBrowserAuth()) { onNeedBrowserAuth(load); return; }
+    setLoading(true); setError('');
+    getHistory()
+      .then(t => { setTracks(t); setCursor(0); })
+      .catch(e => {
+        if (String(e).includes('browser-auth-required')) onNeedBrowserAuth(load);
+        else setError(String(e).slice(0, 80));
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, []);
+
+  useInput((_, key) => {
+    if (!tracks) return;
+    if (key.upArrow)   setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(tracks.length - 1, c + 1));
+    if (key.return && tracks[cursor]) {
+      const t = tracks[cursor];
+      onPlay(t.videoId, t.title, t.artist);
+    }
+  });
+
+  return (
+    <Box flexDirection="column" paddingX={1} flexGrow={1}>
+      <Box marginBottom={1}>
+        <Text bold color="white">{t('tab.history')}</Text>
+        {loading && <Text color="red"> ● {t('loading')}</Text>}
+      </Box>
+      {error && <Text color="red">{error}</Text>}
+      {tracks !== null && tracks.length === 0 && <Text color="gray" dimColor>{t('history.empty')}</Text>}
+      {tracks?.slice(0, 20).map((tr, i) => (
+        <Box key={`h-${i}`}>
+          <Text color={i === cursor ? 'red' : 'white'} dimColor={i !== cursor}>{i === cursor ? '❯ ' : '  '}</Text>
+          <Text bold={i === cursor} color="white" wrap="truncate">{tr.title}</Text>
+          <Text color="white" dimColor>  {tr.artist}</Text>
+          <LyricsTag videoId={tr.videoId} />
+        </Box>
+      ))}
+      {tracks && <Box marginTop={1}><Text color="gray" dimColor>{t('artist.hint')}</Text></Box>}
+    </Box>
+  );
+}
+
 // ── App Principal ───────────────────────────────────────────────
 
 function App() {
@@ -1835,6 +1928,16 @@ function App() {
   const hifiAbort = useRef<AbortController | null>(null);
   const [hifiQuality, setHifiQuality] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Like e browser auth
+  const [likedVideoId, setLikedVideoId] = useState<string | null>(null);
+  const [browserAuthPending, setBrowserAuthPending] = useState(false);
+  const browserAuthCallback = useRef<(() => void) | null>(null);
+
+  const requestBrowserAuth = useCallback((cb: () => void) => {
+    browserAuthCallback.current = cb;
+    setBrowserAuthPending(true);
+  }, []);
 
   // Downloads em andamento
   const [downloads, setDownloads] = useState<Map<string, DownloadInfo>>(new Map());
@@ -1998,6 +2101,19 @@ function App() {
     if (input === 'L') setTab('lyrics');
     if (input === 's') setTab('settings');
     if (input === 'a') setTab('auth');
+    if (input === 'H') setTab('history');
+    if (input === 'k' && status.state !== 'idle' && status.videoId) {
+      const vid = status.videoId;
+      if (likedVideoId === vid) {
+        unlikeTrack(vid).catch(() => {});
+        setLikedVideoId(null);
+      } else {
+        if (!hasBrowserAuth()) { requestBrowserAuth(() => {}); return; }
+        likeTrack(vid)
+          .then(() => setLikedVideoId(vid))
+          .catch(e => { if (String(e).includes('browser-auth-required')) requestBrowserAuth(() => {}); });
+      }
+    }
     if (input === ' ') player.togglePause();
     if (input === 'n') playNext();
     // Volume: bloqueado na tela de config (←→ lá controlam seleção)
@@ -2300,13 +2416,36 @@ function App() {
             setTab('playlists');
           }} />
         )}
+        {tab === 'history' && (
+          <HistoryScreen
+            onNeedBrowserAuth={requestBrowserAuth}
+            onPlay={(videoId, title, artist) => { playTrack(videoId, title, artist, 0); setTab('home'); }}
+          />
+        )}
       </Box>
+
+      {/* Modal: browser login */}
+      {browserAuthPending && (
+        <Box position="absolute" marginTop={4} marginLeft={4}>
+          <BrowserLoginModal
+            onDone={() => {
+              setBrowserAuthPending(false);
+              browserAuthCallback.current?.();
+              browserAuthCallback.current = null;
+            }}
+            onCancel={() => {
+              setBrowserAuthPending(false);
+              browserAuthCallback.current = null;
+            }}
+          />
+        </Box>
+      )}
 
       {/* Downloads */}
       <DownloadsBar downloads={downloads} />
 
       {/* Player bar */}
-      <PlayerBar status={status} hifiQuality={hifiQuality} />
+      <PlayerBar status={status} hifiQuality={hifiQuality} liked={likedVideoId === status.videoId} />
     </Box>
   );
 }
