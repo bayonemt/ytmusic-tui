@@ -2,7 +2,7 @@
 
 A terminal-based YouTube Music player with automatic hi-fi audio upgrade and synchronized karaoke lyrics.
 
-tui-demo.mp4
+https://github.com/user-attachments/assets/d95a52e1-f2d2-46af-a383-71c3f4e17cf2
 
 Plays music from YouTube Music via the Innertube API, then silently finds a higher-quality stream (Qobuz FLAC 24-bit → Tidal FLAC → JioSaavn 320kbps → SoundCloud) and switches mid-playback — no interruptions.
 
