@@ -7,6 +7,8 @@ import fs from 'fs';
 // Mensagens têm header de 8 bytes [opcode LE4][length LE4] + JSON.
 // Opcodes: 0 = HANDSHAKE, 1 = FRAME, 2 = PING, 3 = PONG, 4 = CLOSE.
 
+export const DISCORD_CLIENT_ID = '1546318252966420480';
+
 export interface DiscordActivity {
   details?: string;       // linha 1 — título da música
   state?: string;         // linha 2 — artista

@@ -17,7 +17,7 @@ import { findBestStream, type HifiResult } from './hifi.js';
 import { fetchLyrics, type LyricLine, type LyricWord } from './lyrics.js';
 import { renderArt, prefetchArt, supportsNativeImages, injectKittyId } from './art.js';
 import { t, setLang } from './i18n.js';
-import { DiscordRPC } from './discord.js';
+import { DiscordRPC, DISCORD_CLIENT_ID } from './discord.js';
 
 type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth';
 
@@ -33,7 +33,7 @@ interface LanguageConfig {
   uiLang:     string; // idioma da interface: 'pt' | 'en'
   lyricsLang: string; // idioma das letras: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
 }
-interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; discordClientId?: string; }
+interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
 const DEFAULT_CONFIG: AppConfig = {
@@ -60,7 +60,6 @@ function loadConfig(): AppConfig {
         uiLang:     UI_LANG_OPTIONS.includes(raw?.language?.uiLang)         ? raw.language.uiLang     : 'pt',
         lyricsLang: LYRICS_LANG_OPTIONS.includes(raw?.language?.lyricsLang) ? raw.language.lyricsLang : 'auto',
       },
-      discordClientId: typeof raw?.discordClientId === 'string' ? raw.discordClientId : undefined,
     };
   } catch { return DEFAULT_CONFIG; }
 }
@@ -1915,10 +1914,8 @@ function App() {
   // Discord Rich Presence — atualiza quando a música ou o estado muda
   const discordRpc = useRef<DiscordRPC | null>(null);
   useEffect(() => {
-    const clientId = appConfig.discordClientId;
-    if (!clientId) return;
     if (!discordRpc.current) {
-      discordRpc.current = new DiscordRPC(clientId);
+      discordRpc.current = new DiscordRPC(DISCORD_CLIENT_ID);
       discordRpc.current.connect();
     }
     const rpc = discordRpc.current;
@@ -1941,7 +1938,7 @@ function App() {
         small_text:  status.state === 'playing' ? 'Tocando' : 'Pausado',
       },
     });
-  }, [status.videoId, status.state, appConfig.discordClientId]);
+  }, [status.videoId, status.state]);
 
   // Destrói o cliente Discord ao sair
   useEffect(() => {
