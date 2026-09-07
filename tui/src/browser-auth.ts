@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -7,7 +7,6 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_AUTH_FILE = path.join(__dirname, '..', '.browser-auth.json');
 
-const CHROMIUM_PATH = '/usr/bin/chromium-browser';
 const YTM_ORIGIN = 'https://music.youtube.com';
 
 export interface BrowserAuthData {
@@ -54,11 +53,7 @@ export function getAuthHeaders(): Record<string, string> | null {
 export async function launchBrowserLogin(
   onStatus?: (msg: string) => void,
 ): Promise<boolean> {
-  const browser = await chromium.launch({
-    executablePath: CHROMIUM_PATH,
-    headless: false,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  const browser = await firefox.launch({ headless: false });
 
   const context = await browser.newContext();
   const page = await context.newPage();
