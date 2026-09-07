@@ -29,28 +29,29 @@ with Camoufox(headless=False) as browser:
         try:
             if not browser.is_connected():
                 sys.exit(1)
-            # Busca todos os cookies (sem filtro de URL) — SAPISID é de .google.com,
-            # não de music.youtube.com, então filtrar por URL o excluiria
-            all_cookies = browser.cookies()
+            # Usa page.context.cookies() — browser.cookies() não existe no camoufox
+            all_cookies = page.context.cookies()
+            # Pega o SAPISID de .youtube.com (usado para requisições ao YTM)
             sapisid = next(
-                (c for c in all_cookies if c['name'] in ('SAPISID', '__Secure-3PAPISID')),
+                (c for c in all_cookies
+                 if c['name'] in ('SAPISID', '__Secure-3PAPISID')
+                 and 'youtube.com' in c.get('domain', '')),
                 None,
             )
             if sapisid:
-                # Navega para YTM para garantir que os cookies específicos do YTM sejam gerados
+                # Navega para YTM se não estiver lá, para gerar cookies específicos
                 try:
-                    current_url = page.url
-                    if 'music.youtube.com' not in current_url:
+                    if 'music.youtube.com' not in page.url:
                         page.goto(YTM, wait_until='domcontentloaded', timeout=10000)
                         time.sleep(2)
-                        all_cookies = browser.cookies()
+                        all_cookies = page.context.cookies()
                 except Exception:
                     pass
 
-                header = '; '.join(
-                    f"{c['name']}={c['value']}"
-                    for c in all_cookies if c['name'] in RELEVANT
-                )
+                # Cookie header com cookies do domínio .youtube.com
+                ytm_cookies = [c for c in all_cookies
+                               if c['name'] in RELEVANT and 'youtube.com' in c.get('domain', '')]
+                header = '; '.join(f"{c['name']}={c['value']}" for c in ytm_cookies)
                 with open(output_file, 'w') as f:
                     json.dump({
                         'cookieHeader': header,
