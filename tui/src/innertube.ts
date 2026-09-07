@@ -926,27 +926,36 @@ export async function getPlaylistTracks(browseId: string, params?: string): Prom
 
 
 // Requisição autenticada via cookies do browser (para like/histórico)
-async function webRequestBrowser(endpoint: string, body: Record<string, unknown>) {
+async function webRequestBrowser(
+  endpoint: string,
+  body: Record<string, unknown>,
+  videoId?: string,
+) {
   const authHeaders = getAuthHeaders();
   if (!authHeaders) throw new Error('browser-auth-required');
+  const referer = videoId
+    ? `https://music.youtube.com/watch?v=${videoId}`
+    : 'https://music.youtube.com/';
   const headers: Record<string, string> = {
-    'X-YouTube-Client-Name': '67',
-    'X-YouTube-Client-Version': '1.20250101.01.00',
+    'X-Youtube-Client-Name': '67',
+    'X-Youtube-Client-Version': '1.20260901.12.00',
+    'X-Goog-AuthUser': '0',
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://music.youtube.com/',
+    'Referer': referer,
     'Content-Type': 'application/json',
     ...authHeaders,
   };
   const url = `${INNERTUBE_WEB_BASE}/${endpoint}?prettyPrint=false`;
-  return httpPost(url, { context: buildWebContext(), ...body }, headers);
+  const context = { client: { clientName: 'WEB_REMIX', clientVersion: '1.20260901.12.00', hl: 'pt', gl: 'BR' } };
+  return httpPost(url, { context, ...body }, headers);
 }
 
 export async function likeTrack(videoId: string): Promise<void> {
-  await webRequestBrowser('like/like', { target: { videoId } });
+  await webRequestBrowser('like/like', { target: { videoId } }, videoId);
 }
 
 export async function unlikeTrack(videoId: string): Promise<void> {
-  await webRequestBrowser('like/removelike', { target: { videoId } });
+  await webRequestBrowser('like/removelike', { target: { videoId } }, videoId);
 }
 
 export interface HistoryTrack {

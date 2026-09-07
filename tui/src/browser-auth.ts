@@ -34,7 +34,7 @@ export function computeSAPISIDHASH(sapisid: string): string {
   const hash = crypto.createHash('sha1')
     .update(`${now} ${sapisid} ${YTM_ORIGIN}`)
     .digest('hex');
-  return `SAPISIDHASH ${now}_${hash}`;
+  return `SAPISIDHASH ${now}_${hash}_u`;
 }
 
 export function getAuthHeaders(): Record<string, string> | null {
