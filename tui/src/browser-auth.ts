@@ -1,4 +1,4 @@
-import { firefox } from 'playwright';
+import { spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -48,51 +48,38 @@ export function getAuthHeaders(): Record<string, string> | null {
   };
 }
 
-// Abre o browser, aguarda o usuário logar e captura os cookies.
-// Retorna true em caso de sucesso, false se o usuário fechar o browser.
+// Abre o YouTube Music com camoufox (Firefox anti-detecção), aguarda o login
+// e salva os cookies. Retorna true em caso de sucesso.
 export async function launchBrowserLogin(
   onStatus?: (msg: string) => void,
 ): Promise<boolean> {
-  const browser = await firefox.launch({ headless: false });
+  const tmpFile = path.join(__dirname, '..', '.browser-auth-tmp.json');
+  const helperScript = path.join(__dirname, 'browser-auth-helper.py');
 
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto(YTM_ORIGIN);
+  onStatus?.('Abrindo navegador...');
 
-  onStatus?.('Aguardando login no navegador...');
+  return new Promise((resolve) => {
+    const proc = spawn('python3', [helperScript, tmpFile], {
+      stdio: 'ignore',
+      detached: false,
+    });
 
-  // Verifica a cada segundo se o SAPISID já apareceu (= usuário logou)
-  const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos
-  const start = Date.now();
+    onStatus?.('Aguardando login no navegador...');
 
-  while (Date.now() - start < TIMEOUT_MS) {
-    if (!browser.isConnected()) return false; // usuário fechou o browser
-
-    const cookies = await context.cookies(YTM_ORIGIN);
-    const sapisid = cookies.find(c => c.name === 'SAPISID' || c.name === '__Secure-3PAPISID');
-    if (sapisid) {
-      // Monta o header Cookie completo com todos os cookies relevantes
-      const relevant = ['SAPISID', '__Secure-3PAPISID', 'SID', 'HSID', 'SSID',
-                        '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO', 'VISITOR_INFO1_LIVE'];
-      const cookieHeader = cookies
-        .filter(c => relevant.includes(c.name))
-        .map(c => `${c.name}=${c.value}`)
-        .join('; ');
-
-      saveBrowserAuth({
-        cookieHeader,
-        sapisid: sapisid.value,
-        savedAt: Date.now(),
-      });
-
-      onStatus?.('Login realizado com sucesso!');
-      await browser.close();
-      return true;
-    }
-
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
-  await browser.close();
-  return false;
+    proc.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(tmpFile)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(tmpFile, 'utf-8'));
+          saveBrowserAuth(data);
+          fs.unlinkSync(tmpFile);
+          onStatus?.('Login realizado com sucesso!');
+          resolve(true);
+        } catch {
+          resolve(false);
+        }
+      } else {
+        resolve(false);
+      }
+    });
+  });
 }
