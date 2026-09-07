@@ -16,7 +16,7 @@ import { AudioPlayer, type PlayerStatus } from './player.js';
 import { findBestStream, type HifiResult } from './hifi.js';
 import { fetchLyrics, type LyricLine, type LyricWord } from './lyrics.js';
 import { renderArt, prefetchArt, supportsNativeImages, injectKittyId } from './art.js';
-import { t, setLang } from './i18n.js';
+import { t, setLang, SUPPORTED_LANGS } from './i18n.js';
 import { DiscordRPC, DISCORD_CLIENT_ID } from './discord.js';
 
 type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth';
@@ -41,7 +41,7 @@ const DEFAULT_CONFIG: AppConfig = {
   language: { uiLang: 'pt', lyricsLang: 'auto' },
 };
 
-const UI_LANG_OPTIONS     = ['pt', 'en'];
+const UI_LANG_OPTIONS     = SUPPORTED_LANGS as string[];
 const LYRICS_LANG_OPTIONS = ['auto', 'en', 'pt', 'es', 'ja', 'ko', 'zh'];
 
 function loadConfig(): AppConfig {
@@ -468,8 +468,8 @@ function PlayerBar({ status, hifiQuality }: { status: PlayerStatus; hifiQuality?
 
       {/* Direita: volume */}
       <Box width={20} flexDirection="column" alignItems="flex-end" justifyContent="center">
-        <Text color="white">Espaço=pause  n=próx</Text>
-        <Text color="white">Ctrl+↑=tela  ←→=seek</Text>
+        <Text color="white">{t('player.hint1')}</Text>
+        <Text color="white">{t('player.hint2')}</Text>
         <Box>
           <Text color="white">🔊 </Text>
           <Text color="red">{volBar(status.volume)}</Text>
@@ -525,7 +525,7 @@ function ContextMenu({
       if (key.return) {
         const opt = MENU_OPTIONS[cursor];
         if (opt.id === 'download') {
-          if (!item.videoId) { setStatus('download so funciona para musicas'); return; }
+          if (!item.videoId) { setStatus(t('ctx.dl.songs')); return; }
           const outDir = path.join(os.homedir(), 'Downloads');
           const workerPath = new URL('./download-worker.ts', import.meta.url).pathname;
           const durMs = String(player.status.duration * 1000 || 0);
@@ -543,11 +543,11 @@ function ContextMenu({
           onDownload(item.videoId, item.title);
           setStatus('');
         } else if (opt.id === 'playlist') {
-          if (!item.videoId) { setStatus('so e possivel adicionar musicas a playlists'); return; }
+          if (!item.videoId) { setStatus(t('ctx.pl.songs')); return; }
           setPhase('playlists');
           setStatus('');
         } else if (opt.id === 'nointerest') {
-          setStatus('nao suportado: requer token de feedback da API');
+          setStatus(t('ctx.pl.noapi'));
         }
         return;
       }
@@ -562,10 +562,10 @@ function ContextMenu({
         const pl = playlists[plCursor];
         if (!pl || !item.videoId) return;
         setBusy(true);
-        setStatus(`adicionando a "${pl.title}"...`);
+        setStatus(t('ctx.adding', { name: pl.title }));
         addVideoToPlaylist(item.videoId, pl.browseId)
-          .then(() => { setStatus(`adicionado a "${pl.title}"!`); setPhase('main'); })
-          .catch(e => { setStatus('erro: ' + String(e).slice(0, 60)); setPhase('main'); })
+          .then(() => { setStatus(t('ctx.added', { name: pl.title })); setPhase('main'); })
+          .catch(e => { setStatus(t('ctx.add.err', { msg: String(e).slice(0, 60) })); setPhase('main'); })
           .finally(() => setBusy(false));
       }
     }
@@ -590,9 +590,9 @@ function ContextMenu({
 
       {phase === 'playlists' && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold color="cyan">Escolha a playlist:</Text>
-          {playlists === null && <Text color="gray">carregando...</Text>}
-          {playlists !== null && playlists.length === 0 && <Text color="gray">nenhuma playlist encontrada</Text>}
+          <Text bold color="cyan">{t('ctx.add.pl')}</Text>
+          {playlists === null && <Text color="gray">{t('ctx.pl.loading')}</Text>}
+          {playlists !== null && playlists.length === 0 && <Text color="gray">{t('ctx.pl.none')}</Text>}
           {playlists !== null && playlists.map((pl, i) => (
             <Text key={pl.browseId} color={i === plCursor ? 'cyan' : 'white'}>
               {i === plCursor ? '> ' : '  '}{pl.title}
@@ -672,12 +672,12 @@ function HomeScreen({
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Para você</Text>
-        {loading && <Text color="red"> ● carregando...</Text>}
+        <Text bold color="white">{t('home.title')}</Text>
+        {loading && <Text color="red"> ● {t('loading')}</Text>}
       </Box>
 
       {sections.length === 0 && !loading && (
-        <Text color="gray" dimColor>Nenhum conteúdo encontrado.</Text>
+        <Text color="gray" dimColor>{t('home.empty')}</Text>
       )}
 
       {visible.map((section, vi) => {
@@ -828,9 +828,9 @@ function SearchScreen({
           {/* Lista de resultados */}
           <Box flexDirection="column" flexGrow={1}>
             <Box marginBottom={1}>
-              <Text color="gray" dimColor>Resultados para: </Text>
+              <Text color="gray" dimColor>{t('search.results')}</Text>
               <Text color="red" bold>"{query}"</Text>
-              {loading && <Text color="red"> ● buscando...</Text>}
+              {loading && <Text color="red"> ● {t('search.loading')}</Text>}
             </Box>
 
             {results.slice(0, 14).map((r, i) => {
@@ -840,7 +840,7 @@ function SearchScreen({
                   <Box key={`sr-${i}`}>
                     <Text color={isSel ? 'red' : 'white'} dimColor={!isSel}>{isSel ? '❯ ' : '  '}</Text>
                     <Text bold color={isSel ? 'magenta' : 'white'} dimColor={!isSel} wrap="truncate">{r.name}</Text>
-                    <Text color="magenta" dimColor>  Artista</Text>
+                    <Text color="magenta" dimColor>  {t('search.artist')}</Text>
                   </Box>
                 );
               }
@@ -856,7 +856,7 @@ function SearchScreen({
             })}
 
             {!loading && results.length === 0 && (
-              <Text color="gray" dimColor>Nenhum resultado encontrado.</Text>
+              <Text color="gray" dimColor>{t('search.noresult')}</Text>
             )}
 
             <Box marginTop={1}>
@@ -881,8 +881,8 @@ function SearchScreen({
                 ) : (
                   <>
                     <Text bold color="magenta" wrap="truncate">{selected.name}</Text>
-                    <Text color="white" dimColor>Artista</Text>
-                    <Text color="gray" dimColor wrap="truncate">Enter para ver perfil</Text>
+                    <Text color="white" dimColor>{t('search.artist')}</Text>
+                    <Text color="gray" dimColor wrap="truncate">{t('search.artist.hint')}</Text>
                   </>
                 )}
               </Box>
@@ -915,20 +915,20 @@ function PlaylistsScreen({
   return (
     <Box flexDirection="column" paddingX={1} flexGrow={1}>
       <Box marginBottom={1}>
-        <Text bold color="white">Minhas Playlists</Text>
-        {loading && <Text color="red"> ● carregando...</Text>}
+        <Text bold color="white">{t('pl.title')}</Text>
+        {loading && <Text color="red"> ● {t('loading')}</Text>}
       </Box>
 
       {!loading && !authenticated && (
         <Box flexDirection="column">
-          <Text color="white" dimColor>Você não está logado no YouTube Music.</Text>
+          <Text color="white" dimColor>{t('pl.noauth')}</Text>
           <Text color="white" dimColor>Pressione <Text color="red" bold>[a]</Text><Text color="white" dimColor> para fazer login e ver suas playlists.</Text></Text>
-          <Text color="white" dimColor>(Tocar músicas via busca funciona sem login.)</Text>
+          <Text color="white" dimColor>({t('search.noauth')})</Text>
         </Box>
       )}
 
       {!loading && authenticated && playlists.length === 0 && (
-        <Text color="white" dimColor>Nenhuma playlist encontrada na sua conta.</Text>
+        <Text color="white" dimColor>{t('pl.none')}</Text>
       )}
 
       {playlists.slice(0, 18).map((p, i) => {
@@ -994,7 +994,7 @@ function PlaylistTracksScreen({
       </Box>
 
       {!loading && tracks.length === 0 && (
-        <Text color="white" dimColor>Playlist vazia ou sem músicas disponíveis.</Text>
+        <Text color="white" dimColor>{t('pl.empty')}</Text>
       )}
 
       {visible.map((t, i) => {
@@ -1076,7 +1076,7 @@ function ArtistScreen({
 
   if (!page) return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="red">Artista não encontrado.</Text>
+      <Text color="red">{t('artist.notfound')}</Text>
     </Box>
   );
 
@@ -1541,7 +1541,7 @@ function FullscreenScreen({
     };
   } else if (isActive) {
     // Sem letras ainda (carregando ou não encontradas): mostra texto de status centralizado
-    const statusText = loading ? 'carregando letras...' : '(sem letras)';
+    const statusText = loading ? t('fs.lyrics.loading') : t('fs.lyrics.none');
     const statusRow = Math.max(1, Math.floor(artPanelH / 2) + 1);
     _fsLyricsDirectState = {
       lines: [{ text: statusText, isCurrent: false, dim: true }],
@@ -1683,7 +1683,7 @@ function SettingsScreen({ config, onChange }: { config: AppConfig; onChange: (c:
   ];
 
   const langItems: LangItem[] = [
-    { kind: 'cycle', labelKey: 'settings.lang.ui',     field: 'uiLang',     options: UI_LANG_OPTIONS,     labels: { pt: 'Português', en: 'English' } },
+    { kind: 'cycle', labelKey: 'settings.lang.ui',     field: 'uiLang',     options: UI_LANG_OPTIONS,     labels: Object.fromEntries(SUPPORTED_LANGS.map(l => [l, t(`lang.${l}`)])) },
     { kind: 'cycle', labelKey: 'settings.lang.lyrics', field: 'lyricsLang', options: LYRICS_LANG_OPTIONS, labels: LYRICS_LANG_LABELS },
   ];
 
@@ -1928,7 +1928,7 @@ function App() {
     const end   = status.duration > 0 ? start + Math.floor(status.duration) : undefined;
     // maxresdefault tem até 1280×720; fallback para hqdefault caso não exista
     const thumb = `https://i.ytimg.com/vi/${status.videoId}/hqdefault.jpg`;
-    const title  = status.title  ?? 'Sem título';
+    const title  = status.title  ?? t('player.nothing');
     const artist = status.artist ?? '';
     rpc.setActivity({
       details: title,
