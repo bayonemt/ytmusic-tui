@@ -1924,18 +1924,19 @@ function App() {
       return;
     }
     const now = Math.floor(Date.now() / 1000);
-    const start = now - status.position;
-    const end   = status.duration > 0 ? start + status.duration : undefined;
-    const thumb = `https://i.ytimg.com/vi/${status.videoId}/mqdefault.jpg`;
+    const start = now - Math.floor(status.position);
+    const end   = status.duration > 0 ? start + Math.floor(status.duration) : undefined;
+    // maxresdefault tem até 1280×720; fallback para hqdefault caso não exista
+    const thumb = `https://i.ytimg.com/vi/${status.videoId}/hqdefault.jpg`;
+    const title  = status.title  ?? 'Sem título';
+    const artist = status.artist ?? '';
     rpc.setActivity({
-      details: status.title  ?? 'Sem título',
-      state:   status.artist ? `por ${status.artist}` : undefined,
+      details: title,
+      state:   artist || undefined,
       timestamps: { start, ...(end ? { end } : {}) },
       assets: {
         large_image: thumb,
-        large_text:  status.title ?? '',
-        small_image: status.state === 'playing' ? 'play' : 'pause',
-        small_text:  status.state === 'playing' ? 'Tocando' : 'Pausado',
+        large_text:  artist ? `${title} · ${artist}` : title,
       },
     });
   }, [status.videoId, status.state]);
