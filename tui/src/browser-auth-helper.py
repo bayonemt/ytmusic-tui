@@ -29,15 +29,27 @@ with Camoufox(headless=False) as browser:
         try:
             if not browser.is_connected():
                 sys.exit(1)
-            cookies = browser.cookies([YTM])
+            # Busca todos os cookies (sem filtro de URL) — SAPISID é de .google.com,
+            # não de music.youtube.com, então filtrar por URL o excluiria
+            all_cookies = browser.cookies()
             sapisid = next(
-                (c for c in cookies if c['name'] in ('SAPISID', '__Secure-3PAPISID')),
+                (c for c in all_cookies if c['name'] in ('SAPISID', '__Secure-3PAPISID')),
                 None,
             )
             if sapisid:
+                # Navega para YTM para garantir que os cookies específicos do YTM sejam gerados
+                try:
+                    current_url = page.url
+                    if 'music.youtube.com' not in current_url:
+                        page.goto(YTM, wait_until='domcontentloaded', timeout=10000)
+                        time.sleep(2)
+                        all_cookies = browser.cookies()
+                except Exception:
+                    pass
+
                 header = '; '.join(
                     f"{c['name']}={c['value']}"
-                    for c in cookies if c['name'] in RELEVANT
+                    for c in all_cookies if c['name'] in RELEVANT
                 )
                 with open(output_file, 'w') as f:
                     json.dump({
