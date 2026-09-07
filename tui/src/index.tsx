@@ -489,20 +489,28 @@ function PlayerBar({ status, hifiQuality, liked }: { status: PlayerStatus; hifiQ
 const FEED_VISIBLE_ITEMS = 5;
 
 type MenuPhase = 'main' | 'playlists';
-const MENU_OPTIONS = [
-  { id: 'download',   label: '[v] Baixar  (~Downloads)' },
-  { id: 'playlist',   label: '[+] Adicionar a playlist' },
-  { id: 'nointerest', label: '[x] Nao tenho interesse' },
-];
+
+function buildMenuOptions(liked: boolean) {
+  return [
+    { id: 'like',       label: liked ? '[k] Descurtir ♥' : '[k] Curtir ♡' },
+    { id: 'download',   label: '[v] Baixar  (~Downloads)' },
+    { id: 'playlist',   label: '[+] Adicionar a playlist' },
+    { id: 'nointerest', label: '[x] Nao tenho interesse' },
+  ];
+}
 
 function ContextMenu({
   item,
   onClose,
   onDownload,
+  liked,
+  onLike,
 }: {
   item: FeedItem;
   onClose: () => void;
   onDownload: (videoId: string, title: string) => void;
+  liked: boolean;
+  onLike: () => void;
 }) {
   const [phase, setPhase] = useState<MenuPhase>('main');
   const [cursor, setCursor] = useState(0);
@@ -510,6 +518,8 @@ function ContextMenu({
   const [plCursor, setPlCursor] = useState(0);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const menuOptions = buildMenuOptions(liked);
 
   // Carrega playlists quando entra na fase de escolha
   useEffect(() => {
@@ -525,9 +535,15 @@ function ContextMenu({
 
     if (phase === 'main') {
       if (key.upArrow) { setCursor(c => Math.max(0, c - 1)); return; }
-      if (key.downArrow) { setCursor(c => Math.min(MENU_OPTIONS.length - 1, c + 1)); return; }
+      if (key.downArrow) { setCursor(c => Math.min(menuOptions.length - 1, c + 1)); return; }
       if (key.return) {
-        const opt = MENU_OPTIONS[cursor];
+        const opt = menuOptions[cursor];
+        if (opt.id === 'like') {
+          if (!item.videoId) return;
+          onLike();
+          onClose();
+          return;
+        }
         if (opt.id === 'download') {
           if (!item.videoId) { setStatus(t('ctx.dl.songs')); return; }
           const outDir = path.join(os.homedir(), 'Downloads');
@@ -584,7 +600,7 @@ function ContextMenu({
 
       {phase === 'main' && (
         <Box flexDirection="column" marginTop={1}>
-          {MENU_OPTIONS.map((opt, i) => (
+          {menuOptions.map((opt, i) => (
             <Text key={opt.id} color={i === cursor ? 'cyan' : 'white'}>
               {i === cursor ? '> ' : '  '}{opt.label}
             </Text>
@@ -617,7 +633,7 @@ function ContextMenu({
 }
 
 function HomeScreen({
-  sections, sectionIdx, itemIdx, loading, onSectionChange, onItemChange, onDownload,
+  sections, sectionIdx, itemIdx, loading, onSectionChange, onItemChange, onDownload, likedVideoId, onLike,
 }: {
   sections: FeedSection[];
   sectionIdx: number;
@@ -626,6 +642,8 @@ function HomeScreen({
   onSectionChange: (s: number) => void;
   onItemChange: (i: number) => void;
   onDownload: (videoId: string, title: string) => void;
+  likedVideoId: string | null;
+  onLike: (videoId: string) => void;
 }) {
   const [menuItem, setMenuItem] = useState<FeedItem | null>(null);
 
@@ -745,6 +763,8 @@ function HomeScreen({
           item={menuItem}
           onClose={() => setMenuItem(null)}
           onDownload={onDownload}
+          liked={menuItem.videoId === likedVideoId}
+          onLike={() => { if (menuItem?.videoId) onLike(menuItem.videoId); }}
         />
       )}
 
@@ -2350,6 +2370,18 @@ function App() {
             onDownload={(videoId, title) =>
               setDownloads(prev => new Map(prev).set(videoId, { title, phase: 'searching' }))
             }
+            likedVideoId={likedVideoId}
+            onLike={(vid) => {
+              if (likedVideoId === vid) {
+                unlikeTrack(vid).catch(() => {});
+                setLikedVideoId(null);
+              } else {
+                if (!hasBrowserAuth()) { requestBrowserAuth(() => {}); return; }
+                likeTrack(vid)
+                  .then(() => setLikedVideoId(vid))
+                  .catch(e => { if (String(e).includes('browser-auth-required')) requestBrowserAuth(() => {}); });
+              }
+            }}
           />
         )}
         {tab === 'search' && (openArtistPage !== null || openArtistLoading) && (
