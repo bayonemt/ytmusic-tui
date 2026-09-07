@@ -20,7 +20,7 @@ except ImportError:
     print('camoufox não instalado. Execute: pip install camoufox && python -m camoufox fetch', file=sys.stderr)
     sys.exit(2)
 
-with Camoufox(headful=True) as browser:
+with Camoufox(headless=False) as browser:
     page = browser.new_page()
     page.goto(YTM)
 
