@@ -17,6 +17,7 @@ import { findBestStream, type HifiResult } from './hifi.js';
 import { fetchLyrics, type LyricLine, type LyricWord } from './lyrics.js';
 import { renderArt, prefetchArt, supportsNativeImages, injectKittyId } from './art.js';
 import { t, setLang } from './i18n.js';
+import { DiscordRPC } from './discord.js';
 
 type NavTab = 'home' | 'search' | 'playlists' | 'queue' | 'lyrics' | 'settings' | 'auth';
 
@@ -32,7 +33,7 @@ interface LanguageConfig {
   uiLang:     string; // idioma da interface: 'pt' | 'en'
   lyricsLang: string; // idioma das letras: 'auto'|'en'|'pt'|'es'|'ja'|'ko'|'zh'
 }
-interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; }
+interface AppConfig { lyrics: LyricsConfig; language: LanguageConfig; discordClientId?: string; }
 
 const CONFIG_PATH = path.join(os.homedir(), '.yt-music-config.json');
 const DEFAULT_CONFIG: AppConfig = {
@@ -59,6 +60,7 @@ function loadConfig(): AppConfig {
         uiLang:     UI_LANG_OPTIONS.includes(raw?.language?.uiLang)         ? raw.language.uiLang     : 'pt',
         lyricsLang: LYRICS_LANG_OPTIONS.includes(raw?.language?.lyricsLang) ? raw.language.lyricsLang : 'auto',
       },
+      discordClientId: typeof raw?.discordClientId === 'string' ? raw.discordClientId : undefined,
     };
   } catch { return DEFAULT_CONFIG; }
 }
@@ -1909,6 +1911,42 @@ function App() {
       prefetchArt(status.videoId, fsW, fsH);
     }
   }, [status.videoId]);
+
+  // Discord Rich Presence — atualiza quando a música ou o estado muda
+  const discordRpc = useRef<DiscordRPC | null>(null);
+  useEffect(() => {
+    const clientId = appConfig.discordClientId;
+    if (!clientId) return;
+    if (!discordRpc.current) {
+      discordRpc.current = new DiscordRPC(clientId);
+      discordRpc.current.connect();
+    }
+    const rpc = discordRpc.current;
+    if (status.state === 'idle' || !status.videoId) {
+      rpc.clearActivity();
+      return;
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const start = now - status.position;
+    const end   = status.duration > 0 ? start + status.duration : undefined;
+    const thumb = `https://i.ytimg.com/vi/${status.videoId}/mqdefault.jpg`;
+    rpc.setActivity({
+      details: status.title  ?? 'Sem título',
+      state:   status.artist ? `por ${status.artist}` : undefined,
+      timestamps: { start, ...(end ? { end } : {}) },
+      assets: {
+        large_image: thumb,
+        large_text:  status.title ?? '',
+        small_image: status.state === 'playing' ? 'play' : 'pause',
+        small_text:  status.state === 'playing' ? 'Tocando' : 'Pausado',
+      },
+    });
+  }, [status.videoId, status.state, appConfig.discordClientId]);
+
+  // Destrói o cliente Discord ao sair
+  useEffect(() => {
+    return () => { discordRpc.current?.destroy(); };
+  }, []);
 
   // Background fetch de qualidade para músicas na fila (via cache global)
   useEffect(() => {
